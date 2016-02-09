@@ -1,4 +1,4 @@
-package types
+package dtypes
 
 // Value is an interface for CDB values.
 type Value interface {
@@ -17,12 +17,12 @@ type Patch interface {
 	Encode() string
 }
 
-func NewZeroValue(dataType string) Value {
+func NewZeroValue(dtype string) (Value, error) {
 	// FIXME: Implement.
-	return nil
+	return nil, nil
 }
 
-func DecodePatch(dataType, s string) (Patch, error) {
+func DecodePatch(dtype, s string) (Patch, error) {
 	// FIXME: Implement.
 	return nil, nil
 }

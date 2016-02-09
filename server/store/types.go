@@ -3,7 +3,7 @@ package store
 import (
 	"time"
 
-	"github.com/asadovsky/cdb/server/types"
+	"github.com/asadovsky/cdb/server/dtypes"
 )
 
 ////////////////////////////////////////////////////////////
@@ -13,8 +13,8 @@ import (
 // metadata.
 // Key is of the form [Key], where Key is the object key.
 type ValueEnvelope struct {
-	DataType string
-	Value    types.Value
+	DType string
+	Value dtypes.Value
 }
 
 // PatchEnvelope is the in-memory representation of a Patch and its associated
@@ -26,8 +26,8 @@ type PatchEnvelope struct {
 	LocalSeq int // position in local, cross-device patch log
 	Time     time.Time
 	Key      string
-	DataType string
-	Patch    types.Patch
+	DType    string
+	Patch    dtypes.Patch
 }
 
 ////////////////////////////////////////////////////////////
@@ -37,8 +37,8 @@ type PatchEnvelope struct {
 
 // SValueEnvelope is an encodable ValueEnvelope.
 type SValueEnvelope struct {
-	DataType string
-	Value    string // encoded
+	DType string
+	Value string // encoded
 }
 
 // SPatchEnvelope is an encodable PatchEnvelope.
@@ -46,6 +46,6 @@ type SPatchEnvelope struct {
 	LocalSeq int   // position in local, cross-device patch log
 	Time     int64 // UnixNano
 	Key      string
-	DataType string
+	DType    string
 	Patch    string // encoded
 }

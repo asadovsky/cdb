@@ -13,10 +13,10 @@ type SubscribeC2S struct {
 }
 
 type PatchC2S struct {
-	Type     string
-	Key      string
-	DataType string // "delete" means, delete this record
-	Patch    string // encoded
+	Type  string
+	Key   string
+	DType string // "delete" means, delete this record
+	Patch string // encoded
 }
 
 ////////////////////////////////////////////////////////////
@@ -29,18 +29,18 @@ type SubscribeResponseS2C struct {
 }
 
 type ValueS2C struct {
-	Type     string
-	Key      string
-	DataType string
-	Value    string // encoded
+	Type  string
+	Key   string
+	DType string
+	Value string // encoded
 }
 
 type PatchS2C struct {
 	Type     string
-	DeviceId int // device that created this patch
-	ClientId int // client that created this patch
+	DeviceId int  // device that created this patch
+	IsLocal  bool // true iff patch originated from this client (on this device)
 	Key      string
-	DataType string // "delete" means, delete this record
+	DType    string // "delete" means, delete this record
 	Patch    string // encoded
 }
 
@@ -66,6 +66,6 @@ type PatchR2I struct {
 	DeviceId  int // device that created this patch
 	DeviceSeq int // position in sequence of patches created by DeviceId
 	Key       string
-	DataType  string
+	DType     string
 	Patch     string // encoded
 }

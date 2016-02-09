@@ -12,8 +12,8 @@ import (
 	"github.com/asadovsky/gosh"
 	"github.com/gorilla/websocket"
 
+	"github.com/asadovsky/cdb/server/dtypes"
 	"github.com/asadovsky/cdb/server/store"
-	"github.com/asadovsky/cdb/server/types"
 )
 
 var (
@@ -52,7 +52,7 @@ type hub struct {
 }
 
 func newHub() *hub {
-	// TODO: Check whether deviceId exists in store.
+	// TODO: Attempt to read device id from persistent storage.
 	return &hub{
 		deviceId: rand.Int(),
 	}
@@ -63,6 +63,10 @@ type stream struct {
 	conn *websocket.Conn
 	// Populated if connection is from a client.
 	clientId *int
+	// Queue of written local sequence numbers. Used to determine whether a log
+	// record originated from this client.
+	// TODO: Use a linked list or somesuch.
+	localSeqs []int
 	// Populated if connection is from a server (a peer).
 	deviceId      *int
 	versionVector map[int]int
@@ -80,23 +84,22 @@ func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 	it := s.h.store.NewIterator()
 	for it.Advance() {
 		valueMsgs = append(valueMsgs, ValueS2C{
-			Type:     "ValueS2C",
-			Key:      it.Key(),
-			DataType: it.Value().DataType,
-			Value:    it.Value().Value.Encode(),
+			Type:  "ValueS2C",
+			Key:   it.Key(),
+			DType: it.Value().DType,
+			Value: it.Value().Value.Encode(),
 		})
 	}
 	if err := it.Err(); err != nil {
 		return err
 	}
-	versionVector := s.h.store.Head()
+	versionVector := s.h.store.Log.Head()
 	s.h.mu.Unlock()
-	res := &SubscribeResponseS2C{
+	if err := s.conn.WriteJSON(&SubscribeResponseS2C{
 		Type:     "SubscribeResponseS2C",
 		DeviceId: s.h.deviceId,
 		ClientId: *s.clientId,
-	}
-	if err := s.conn.WriteJSON(res); err != nil {
+	}); err != nil {
 		return err
 	}
 	for valueMsg := range valueMsgs {
@@ -104,7 +107,39 @@ func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 			return err
 		}
 	}
-	// FIXME: Start streaming patches.
+	// Start streaming patches.
+	// TODO: This goroutine should exit if the stream has broken.
+	go func() {
+		// TODO: Better error handling.
+		for {
+			s.h.store.Log.Wait(versionVector)
+			it := s.h.store.Log.NewIterator(versionVector)
+			for {
+				s.h.mu.Lock()
+				ok := it.Advance()
+				s.h.mu.Unlock()
+				if !ok {
+					break
+				}
+				versionVector = it.VersionVector()
+				patch := it.Patch()
+				isLocal := false
+				if len(s.localSeqs) > 0 && s.localSeqs[0] == patch.LocalSeq {
+					isLocal = true
+					s.localSeqs = s.localSeqs[1:]
+				}
+				ok(s.conn.WriteJSON(&PatchS2C{
+					Type:     "PatchS2C",
+					DeviceId: it.DeviceId(),
+					IsLocal:  isLocal,
+					Key:      patch.Key,
+					DType:    patch.DType,
+					Patch:    patch.Patch.Encode(),
+				}))
+			}
+			ok(it.Err())
+		}
+	}()
 	return nil
 }
 
@@ -132,12 +167,17 @@ func (s *stream) processPatchC2S(msg *PatchC2S) error {
 	if s.clientId != nil || s.deviceId != nil {
 		return errors.New("not initialized")
 	}
-	patch, err := types.DecodePatch(msg.DataType, msg.Patch)
+	patch, err := dtypes.DecodePatch(msg.DType, msg.Patch)
 	if err != nil {
 		return err
 	}
 	// Update store and log.
-	return s.h.store.ApplyPatch(s.h.deviceId, msg.Key, msg.DataType, patch)
+	localSeq, err := s.h.store.ApplyPatch(s.h.deviceId, msg.Key, msg.DType, patch)
+	if err != nil {
+		return err
+	}
+	s.localSeqs = append(s.localSeqs, localSeq)
+	return nil
 }
 
 func (h *hub) handleConn(w http.ResponseWriter, r *http.Request) {

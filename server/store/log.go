@@ -5,10 +5,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/asadovsky/cdb/server/types"
+	"github.com/asadovsky/cdb/server/dtypes"
 )
 
-type log struct {
+type Log struct {
 	cond *sync.Cond
 	// Maps device id to patches created by that device.
 	m            map[int][]*PatchEnvelope
@@ -16,36 +16,15 @@ type log struct {
 	nextLocalSeq int
 }
 
-// head returns a new version vector representing current knowledge.
+// Head returns a new version vector representing current knowledge.
 // cond.L must be held.
-func (l *log) getHead() map[int]int {
-	res := map[int]int{}
-	for k, v := range l.head {
-		res[k] = v
-	}
-	return res
+func (l *Log) Head() map[int]int {
+	return copyVec(l.head)
 }
 
-// push writes the given patch (from the given device id) to the log.
-// cond.L must be held.
-func (l *log) push(deviceId int, key string, dataType string, patch types.Patch) error {
-	s := append(l.m[deviceId], &PatchEnvelope{
-		LocalSeq: l.nextLocalSeq,
-		Time:     time.Now(),
-		Key:      key,
-		DataType: dataType,
-		Patch:    patch,
-	})
-	l.nextLocalSeq++
-	l.m[deviceId] = s
-	l.head[deviceId] = len(s)
-	l.cond.Broadcast()
-	return nil
-}
-
-// wait blocks until the log has patches beyond the given version vector.
+// Wait blocks until the log has patches beyond the given version vector.
 // cond.L must not be held.
-func (l *log) wait(vec map[int]int) {
+func (l *Log) Wait(vec map[int]int) {
 	l.cond.L.Lock()
 	defer l.cond.L.Unlock()
 	for !leq(l.head, vec) {
@@ -53,11 +32,30 @@ func (l *log) wait(vec map[int]int) {
 	}
 }
 
+// push appends the given patch (from the given device id) to the log and
+// returns the local sequence number for the written log record.
+// cond.L must be held.
+func (l *Log) push(deviceId int, key, dtype string, patch dtypes.Patch) (int, error) {
+	localSeq := l.nextLocalSeq
+	l.nextLocalSeq++
+	s := append(l.m[deviceId], &PatchEnvelope{
+		LocalSeq: localSeq,
+		Time:     time.Now(),
+		Key:      key,
+		DType:    dtype,
+		Patch:    patch,
+	})
+	l.m[deviceId] = s
+	l.head[deviceId] = len(s)
+	l.cond.Broadcast()
+	return localSeq, nil
+}
+
 ////////////////////////////////////////////////////////////
 // LogIterator
 
 type LogIterator struct {
-	l   *log
+	l   *Log
 	vec map[int]int
 	// Device id and sequence number for staged patch.
 	deviceId  int
@@ -66,8 +64,8 @@ type LogIterator struct {
 
 // NewIterator returns an iterator for patches beyond the given version vector.
 // Iteration order matches log order. cond.L must be held during calls to
-// NewIterator and Advance, but need not be held at other times.
-func (l *log) NewIterator(vec map[int]int) *LogIterator {
+// Advance, but need not be held at other times.
+func (l *Log) NewIterator(vec map[int]int) *LogIterator {
 	return &LogIterator{l: l, vec: vec, deviceId: -1, deviceSeq: -1}
 }
 
@@ -93,8 +91,19 @@ func (it *LogIterator) Advance() bool {
 }
 
 // Value returns the current patch.
-func (it *LogIterator) Value() *PatchEnvelope {
+func (it *LogIterator) Patch() *PatchEnvelope {
 	return it.l.m[it.deviceId][it.deviceSeq]
+}
+
+// DeviceId returns the device id that produced the current patch.
+func (it *LogIterator) DeviceId() int {
+	return it.deviceId
+}
+
+// VersionVector returns a copy of the current version vector, representing
+// which patches the client has already seen.
+func (it *LogIterator) VersionVector() map[int]int {
+	return copyVec(it.vec)
 }
 
 // Err returns a non-nil error iff the iterator encountered an error.
@@ -104,6 +113,15 @@ func (it *LogIterator) Err() error {
 
 ////////////////////////////////////////////////////////////
 // Version vector helpers
+
+// copyVec returns a copy of the given version vector.
+func copyVec(vec map[int]int) map[int]int {
+	res := map[int]int{}
+	for k, v := range vec {
+		res[k] = v
+	}
+	return res
+}
 
 // leq returns true iff a[x] <= b[x] for all x in a.
 func leq(a, b map[int]int) bool {

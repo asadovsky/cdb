@@ -4,52 +4,47 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/asadovsky/cdb/server/types"
+	"github.com/asadovsky/cdb/server/dtypes"
 )
 
 type Store struct {
+	Log *Log
 	// Maps key to value.
 	m map[string]*ValueEnvelope
-	l *log
 }
 
 // OpenStore returns a store.
 func OpenStore(mu *sync.Mutex) *Store {
 	// TODO: Persistence.
 	return &Store{
-		m: map[string]*ValueEnvelope{},
-		l: &log{
+		Log: &Log{
 			cond: sync.NewCond(mu),
 			m:    map[int][]*PatchEnvelope{},
 			head: map[int]int{},
 		},
+		m: map[string]*ValueEnvelope{},
 	}
 }
 
-// Head returns a new version vector representing current knowledge.
+// ApplyPatch applies the given patch and returns the local sequence number for
+// the written log record.
 // Mutex must be held.
-func (s *Store) Head() map[int]int {
-	return s.l.getHead()
-}
-
-// ApplyPatch applies the given patch.
-// Mutex must be held.
-func (s *Store) ApplyPatch(deviceId int, key string, dataType string, patch types.Patch) error {
+func (s *Store) ApplyPatch(deviceId int, key string, dtype string, patch dtypes.Patch) (int, error) {
 	value, ok := s.m[key]
 	if !ok {
-		value = &ValueEnvelope{
-			DataType: dataType,
-			Value:    types.NewZeroValue(dataType),
+		zeroValue, err := dtypes.NewZeroValue(dtype)
+		if err != nil {
+			return 0, err
 		}
-		s.m[key] = value
+		s.m[key] = &ValueEnvelope{DType: dtype, Value: zeroValue}
 	}
 	var err error
 	patch, err = value.Value.ApplyPatch(patch)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	// TODO: Commit changes iff there were no errors.
-	return s.l.push(deviceId, key, dataType, patch)
+	return s.Log.push(deviceId, key, dtype, patch)
 }
 
 ////////////////////////////////////////////////////////////
