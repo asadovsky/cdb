@@ -24,7 +24,7 @@ type PatchC2S struct {
 
 type SubscribeResponseS2C struct {
 	Type     string
-	DeviceId int
+	AgentId  int
 	ClientId int // id for this client
 }
 
@@ -36,12 +36,12 @@ type ValueS2C struct {
 }
 
 type PatchS2C struct {
-	Type     string
-	DeviceId int  // device that created this patch
-	IsLocal  bool // true iff patch originated from this client (on this device)
-	Key      string
-	DType    string // "delete" means, delete this record
-	Patch    string // encoded
+	Type    string
+	AgentId int  // agent that created this patch
+	IsLocal bool // true iff patch originated from this client (on this agent)
+	Key     string
+	DType   string // "delete" means, delete this record
+	Patch   string // encoded
 }
 
 ////////////////////////////////////////////////////////////
@@ -49,7 +49,7 @@ type PatchS2C struct {
 
 type SubscribeI2R struct {
 	Type          string
-	DeviceId      int // initiator's device id
+	AgentId       int // initiator's agent id
 	VersionVector map[int]int
 }
 
@@ -57,15 +57,15 @@ type SubscribeI2R struct {
 // Responder-to-initiator messages
 
 type SubscribeResponseR2I struct {
-	Type     string
-	DeviceId int // responder's device id
+	Type    string
+	AgentId int // responder's agent id
 }
 
 type PatchR2I struct {
-	Type      string
-	DeviceId  int // device that created this patch
-	DeviceSeq int // position in sequence of patches created by DeviceId
-	Key       string
-	DType     string
-	Patch     string // encoded
+	Type     string
+	AgentId  int // agent that created this patch
+	AgentSeq int // position in sequence of patches created by AgentId
+	Key      string
+	DType    string
+	Patch    string // encoded
 }

@@ -9,7 +9,7 @@ import (
 ////////////////////////////////////////////////////////////
 // In-memory types
 
-// ValueEnvelope is the in-memory representation of a Value and its associated
+// ValueEnvelope is the in-memory representation of a value and its associated
 // metadata.
 // Key is of the form [Key], where Key is the object key.
 type ValueEnvelope struct {
@@ -17,17 +17,17 @@ type ValueEnvelope struct {
 	Value dtypes.Value
 }
 
-// PatchEnvelope is the in-memory representation of a Patch and its associated
+// PatchEnvelope is the in-memory representation of a patch and its associated
 // metadata.
-// Key is of the form [DeviceId]:[DeviceSeq], where DeviceId is the creator's
-// device id and [DeviceSeq] is the position in the sequence of patches created
-// by DeviceId.
+// Key is of the form [AgentId]:[AgentSeq], where AgentId is the creator's agent
+// id and [AgentSeq] is the position in the sequence of patches created by
+// AgentId.
 type PatchEnvelope struct {
-	LocalSeq int // position in local, cross-device patch log
+	LocalSeq int // position in local, cross-agent patch log
 	Time     time.Time
 	Key      string
 	DType    string
-	Patch    dtypes.Patch
+	Patch    string // encoded
 }
 
 ////////////////////////////////////////////////////////////
@@ -43,7 +43,7 @@ type SValueEnvelope struct {
 
 // SPatchEnvelope is an encodable PatchEnvelope.
 type SPatchEnvelope struct {
-	LocalSeq int   // position in local, cross-device patch log
+	LocalSeq int   // position in local, cross-agent patch log
 	Time     int64 // UnixNano
 	Key      string
 	DType    string

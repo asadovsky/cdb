@@ -45,16 +45,16 @@ func jsonMarshal(v interface{}) []byte {
 // TODO: Hold list of peer addresses to talk to, and periodically attempt to
 // connect to each peer.
 type hub struct {
-	deviceId     int
+	agentId      int
 	mu           sync.Mutex // protects the fields below
 	nextClientId int
 	store        *store.Store
 }
 
 func newHub() *hub {
-	// TODO: Attempt to read device id from persistent storage.
+	// TODO: Attempt to read agent id from persistent storage.
 	return &hub{
-		deviceId: rand.Int(),
+		agentId: rand.Int(),
 	}
 }
 
@@ -68,13 +68,13 @@ type stream struct {
 	// TODO: Use a linked list or somesuch.
 	localSeqs []int
 	// Populated if connection is from a server (a peer).
-	deviceId      *int
-	versionVector map[int]int
+	agentId *int
+	vec     *dtypes.VersionVector
 }
 
 func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 	s.h.mu.Lock()
-	if s.clientId != nil || s.deviceId != nil {
+	if s.clientId != nil || s.agentId != nil {
 		return errAlreadyInitialized
 	}
 	*s.clientId = s.h.nextClientId
@@ -83,21 +83,25 @@ func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 	valueMsgs := []ValueS2C{}
 	it := s.h.store.NewIterator()
 	for it.Advance() {
+		valueStr, err := it.Value().Value.Encode()
+		if err != nil {
+			return err
+		}
 		valueMsgs = append(valueMsgs, ValueS2C{
 			Type:  "ValueS2C",
 			Key:   it.Key(),
 			DType: it.Value().DType,
-			Value: it.Value().Value.Encode(),
+			Value: valueStr,
 		})
 	}
 	if err := it.Err(); err != nil {
 		return err
 	}
-	versionVector := s.h.store.Log.Head()
+	vec := s.h.store.Log.Head()
 	s.h.mu.Unlock()
 	if err := s.conn.WriteJSON(&SubscribeResponseS2C{
 		Type:     "SubscribeResponseS2C",
-		DeviceId: s.h.deviceId,
+		AgentId:  s.h.agentId,
 		ClientId: *s.clientId,
 	}); err != nil {
 		return err
@@ -112,16 +116,16 @@ func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 	go func() {
 		// TODO: Better error handling.
 		for {
-			s.h.store.Log.Wait(versionVector)
-			it := s.h.store.Log.NewIterator(versionVector)
+			s.h.store.Log.Wait(vec)
+			it := s.h.store.Log.NewIterator(vec)
 			for {
 				s.h.mu.Lock()
-				ok := it.Advance()
+				advanced := it.Advance()
 				s.h.mu.Unlock()
-				if !ok {
+				if !advanced {
 					break
 				}
-				versionVector = it.VersionVector()
+				vec = it.VersionVector()
 				patch := it.Patch()
 				isLocal := false
 				if len(s.localSeqs) > 0 && s.localSeqs[0] == patch.LocalSeq {
@@ -129,12 +133,12 @@ func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 					s.localSeqs = s.localSeqs[1:]
 				}
 				ok(s.conn.WriteJSON(&PatchS2C{
-					Type:     "PatchS2C",
-					DeviceId: it.DeviceId(),
-					IsLocal:  isLocal,
-					Key:      patch.Key,
-					DType:    patch.DType,
-					Patch:    patch.Patch.Encode(),
+					Type:    "PatchS2C",
+					AgentId: it.AgentId(),
+					IsLocal: isLocal,
+					Key:     patch.Key,
+					DType:   patch.DType,
+					Patch:   patch.Patch,
 				}))
 			}
 			ok(it.Err())
@@ -145,14 +149,14 @@ func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 
 func (s *stream) processSubscribeI2R(msg *SubscribeI2R) error {
 	s.h.mu.Lock()
-	if s.clientId != nil || s.deviceId != nil {
+	if s.clientId != nil || s.agentId != nil {
 		return errAlreadyInitialized
 	}
-	*s.deviceId = msg.DeviceId
+	*s.agentId = msg.AgentId
 	s.h.mu.Unlock()
 	res := &SubscribeResponseR2I{
-		Type:     "SubscribeResponseR2I",
-		DeviceId: s.h.deviceId,
+		Type:    "SubscribeResponseR2I",
+		AgentId: s.h.agentId,
 	}
 	if err := s.conn.WriteJSON(res); err != nil {
 		return err
@@ -164,15 +168,11 @@ func (s *stream) processSubscribeI2R(msg *SubscribeI2R) error {
 func (s *stream) processPatchC2S(msg *PatchC2S) error {
 	s.h.mu.Lock()
 	defer s.h.mu.Unlock()
-	if s.clientId != nil || s.deviceId != nil {
+	if s.clientId != nil || s.agentId != nil {
 		return errors.New("not initialized")
 	}
-	patch, err := dtypes.DecodePatch(msg.DType, msg.Patch)
-	if err != nil {
-		return err
-	}
 	// Update store and log.
-	localSeq, err := s.h.store.ApplyPatch(s.h.deviceId, msg.Key, msg.DType, patch)
+	localSeq, err := s.h.store.ApplyPatch(s.h.agentId, msg.Key, msg.DType, msg.Patch)
 	if err != nil {
 		return err
 	}

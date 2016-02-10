@@ -1,8 +1,10 @@
 package store
 
 import (
+	"errors"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/asadovsky/cdb/server/dtypes"
 )
@@ -20,16 +22,21 @@ func OpenStore(mu *sync.Mutex) *Store {
 		Log: &Log{
 			cond: sync.NewCond(mu),
 			m:    map[int][]*PatchEnvelope{},
-			head: map[int]int{},
+			head: &dtypes.VersionVector{},
 		},
 		m: map[string]*ValueEnvelope{},
 	}
 }
 
-// ApplyPatch applies the given patch and returns the local sequence number for
-// the written log record.
-// Mutex must be held.
-func (s *Store) ApplyPatch(deviceId int, key string, dtype string, patch dtypes.Patch) (int, error) {
+// ApplyPatch applies the given encoded patch and returns the local sequence
+// number for the written log record. Mutex must be held.
+func (s *Store) ApplyPatch(agentId int, key string, dtype string, patch string) (int, error) {
+	// TODO: Handle deletions in such a way that the deletion trumps concurrent
+	// ops on the deleted object. Seems we need a tombstone with an attached
+	// version vector.
+	if dtype == dtypes.DTypeDelete {
+		return 0, errors.New("not implemented")
+	}
 	value, ok := s.m[key]
 	if !ok {
 		zeroValue, err := dtypes.NewZeroValue(dtype)
@@ -38,13 +45,20 @@ func (s *Store) ApplyPatch(deviceId int, key string, dtype string, patch dtypes.
 		}
 		s.m[key] = &ValueEnvelope{DType: dtype, Value: zeroValue}
 	}
-	var err error
-	patch, err = value.Value.ApplyPatch(patch)
+	// Build incremented version vector to pass to Value.ApplyPatch.
+	vec := s.Log.Head()
+	seq, ok := vec.Get(agentId)
+	if ok {
+		seq++
+	}
+	vec.Put(agentId, seq)
+	t := time.Now()
+	patch, err := value.Value.ApplyPatch(agentId, vec, t, patch)
 	if err != nil {
 		return 0, err
 	}
 	// TODO: Commit changes iff there were no errors.
-	return s.Log.push(deviceId, key, dtype, patch)
+	return s.Log.push(agentId, t, key, dtype, patch)
 }
 
 ////////////////////////////////////////////////////////////

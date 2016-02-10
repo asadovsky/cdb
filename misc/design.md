@@ -136,12 +136,12 @@ before Value for a given key.
 ## Server-server communication
 
 Servers talk over WebSocket. As with client-server, server-server communication
-is message-based for now. Every server has a device id, initialized to a random
+is message-based for now. Every server has an agent id, initialized to a random
 number the first time the server is started.
 
 Initiator-to-responder messages:
-- Subscribe: {deviceId, versionVector}
-- Unsubscribe: {deviceId}
+- Subscribe: {agentId, versionVector}
+- Unsubscribe: {agentId}
 
 Semantics: When initiator sends Subscribe, responder starts streaming back
 Patches for every object. Starting point is determined by initiator's version
@@ -161,7 +161,7 @@ should be able watch select keys.)
 
 - Built around an oplog (of patches) plus a key-value store (of values)
 - Oplog records contain sequence number, key, and value delta
-- Physical oplog is partitioned by originating device id; each oplog record
+- Physical oplog is partitioned by originating agent id; each oplog record
   contains a sequence number tracking its position in this particular server's
   logical oplog
 
@@ -185,8 +185,8 @@ Goroutine per client:
 
 ## Server-server (sync) impl
 
-Each device maintains a version vector describing its current knowledge: map of
-device id to sequence number.
+Each agent maintains a version vector describing its current knowledge: map of
+agent id to sequence number.
 
 Goroutine per peer:
 - Upon connection, send current version vector

@@ -1,28 +1,34 @@
 package dtypes
 
+import (
+	"fmt"
+	"time"
+)
+
+const (
+	DTypeCRegister = "cregister"
+	DTypeCString   = "cstring"
+	DTypeDelete    = "delete"
+)
+
 // Value is an interface for CDB values.
 type Value interface {
 	// Encode returns the encoded value, suitable for persistent storage.
-	Encode() string
-	// ApplyPatch applies the given patch to this value and returns a finalized
-	// patch suitable for persistent storage. The provided patch may include
-	// client-only operations; the returned patch will never contain such
-	// operations.
-	ApplyPatch(p Patch) (Patch, error)
-}
-
-// Patch is an interface for patches to CDB values.
-type Patch interface {
-	// Encode returns the encoded patch, suitable for persistent storage.
-	Encode() string
+	Encode() (string, error)
+	// ApplyPatch applies the given encoded patch to this value and returns a
+	// finalized encoded patch suitable for persistent storage. The provided patch
+	// may include client-only operations; the returned patch will never contain
+	// such operations.
+	ApplyPatch(agentId int, vec *VersionVector, t time.Time, patch string) (string, error)
 }
 
 func NewZeroValue(dtype string) (Value, error) {
-	// FIXME: Implement.
-	return nil, nil
-}
-
-func DecodePatch(dtype, s string) (Patch, error) {
-	// FIXME: Implement.
-	return nil, nil
+	switch dtype {
+	case DTypeCRegister:
+		return NewCRegister(), nil
+	case DTypeCString:
+		return NewCString(), nil
+	default:
+		return nil, fmt.Errorf("unknown dtype: %s", dtype)
+	}
 }
