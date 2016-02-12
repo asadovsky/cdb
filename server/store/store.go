@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/asadovsky/cdb/server/common"
 	"github.com/asadovsky/cdb/server/dtypes"
 )
 
@@ -22,7 +23,7 @@ func OpenStore(mu *sync.Mutex) *Store {
 		Log: &Log{
 			cond: sync.NewCond(mu),
 			m:    map[int][]*PatchEnvelope{},
-			head: &dtypes.VersionVector{},
+			head: &common.VersionVector{},
 		},
 		m: map[string]*ValueEnvelope{},
 	}

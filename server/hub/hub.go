@@ -12,7 +12,7 @@ import (
 	"github.com/asadovsky/gosh"
 	"github.com/gorilla/websocket"
 
-	"github.com/asadovsky/cdb/server/dtypes"
+	"github.com/asadovsky/cdb/server/common"
 	"github.com/asadovsky/cdb/server/store"
 )
 
@@ -69,7 +69,7 @@ type stream struct {
 	localSeqs []int
 	// Populated if connection is from a server (a peer).
 	agentId *int
-	vec     *dtypes.VersionVector
+	vec     *common.VersionVector
 }
 
 func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {

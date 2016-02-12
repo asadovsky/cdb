@@ -5,26 +5,26 @@ import (
 	"sync"
 	"time"
 
-	"github.com/asadovsky/cdb/server/dtypes"
+	"github.com/asadovsky/cdb/server/common"
 )
 
 type Log struct {
 	cond *sync.Cond
 	// Maps agent id to patches created by that agent.
 	m            map[int][]*PatchEnvelope
-	head         *dtypes.VersionVector
+	head         *common.VersionVector
 	nextLocalSeq int
 }
 
 // Head returns a new version vector representing current knowledge. cond.L must
 // be held.
-func (l *Log) Head() *dtypes.VersionVector {
+func (l *Log) Head() *common.VersionVector {
 	return l.head.Copy()
 }
 
 // Wait blocks until the log has patches beyond the given version vector. cond.L
 // must not be held.
-func (l *Log) Wait(vec *dtypes.VersionVector) {
+func (l *Log) Wait(vec *common.VersionVector) {
 	l.cond.L.Lock()
 	defer l.cond.L.Unlock()
 	for l.head.Leq(vec) {
@@ -55,7 +55,7 @@ func (l *Log) push(agentId int, t time.Time, key, dtype string, patch string) (i
 
 type LogIterator struct {
 	l   *Log
-	vec *dtypes.VersionVector
+	vec *common.VersionVector
 	// Agent id and sequence number for staged patch.
 	agentId  int
 	agentSeq int
@@ -64,7 +64,7 @@ type LogIterator struct {
 // NewIterator returns an iterator for patches beyond the given version vector.
 // Iteration order matches log order. cond.L must be held during calls to
 // Advance, but need not be held at other times.
-func (l *Log) NewIterator(vec *dtypes.VersionVector) *LogIterator {
+func (l *Log) NewIterator(vec *common.VersionVector) *LogIterator {
 	return &LogIterator{l: l, vec: vec, agentId: -1, agentSeq: -1}
 }
 
@@ -101,7 +101,7 @@ func (it *LogIterator) AgentId() int {
 
 // VersionVector returns a copy of the current version vector, representing
 // which patches the client has already seen.
-func (it *LogIterator) VersionVector() *dtypes.VersionVector {
+func (it *LogIterator) VersionVector() *common.VersionVector {
 	return it.vec.Copy()
 }
 

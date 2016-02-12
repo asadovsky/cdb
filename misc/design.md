@@ -25,7 +25,7 @@ JavaScript, for now.
 
 Types:
 - Non-value types: Store, Collection
-- Value types (base class: CModel): CRegister, CString, CList, CMap
+- Value types (base class: CValue): CRegister, CString, CList, CMap
 
 Note: The 'C' prefix might stand for "collaborative", or "concurrent", or
 "conflict-free", or "CRDT", or something else entirely. It distinguishes our
@@ -54,18 +54,18 @@ TODO:
 
 Methods:
 
-    c.get('key') => {err, CModel}
-    c.getOrCreate('key', type) => {err, CModel, created}
+    c.get('key') => {err, CValue}
+    c.getOrCreate('key', dtype) => {err, CValue, created}
     // Value must be a native JS type, and will be converted to a Register.
     c.put('key', value) => {err}
     c.delete('key') => {err}
 
-## CModel (base class)
+## CValue (base class)
 
-    // Returns a native JS type that represents the value of this CModel.
-    m.getNativeObject() => Object
+    // Returns a native JS type that represents the value of this CValue.
+    m.value() => Object
 
-Note: For now, CModel instances are always "live" and observable: they always
+Note: For now, CValue instances are always "live" and observable: they always
 reflect the latest state from the server, and they emit events whenever their
 value changes.
 
@@ -85,7 +85,7 @@ Events:
 Methods:
 
     s.getText() => String
-    range = s.getSelectionRange() => []int  // [start, end]
+    s.getSelectionRange() => []int  // [start, end]
     s.replaceText(pos, len, value)
     s.setSelectionRange(start, end)
 
@@ -102,8 +102,8 @@ TODO: Specify methods and events.
 
 Similar to Collection.
 
-    m.get('key') => {err, CModel}
-    m.getOrCreate('key', type) => {err, CModel, created}
+    m.get('key') => {err, CValue}
+    m.getOrCreate('key', dtype) => {err, CValue, created}
     // Value must be a native JS type, and will be converted to a Register.
     m.put('key', value) => {err}
     m.delete('key') => {err}
@@ -112,7 +112,7 @@ TODO: Specify events.
 
 # Server API
 
-## Client-server communication
+## Client-server protocol
 
 Client talks to server over WebSocket, initialized by openStore. For this
 initial prototype, communication is message-based (like Mojo), not call-based
@@ -122,18 +122,19 @@ order and we panic on any error.
 Client-to-server messages:
 - Subscribe: {}
 - Unsubscribe: {}
-- Upsert: {key, type, valueDelta}
-- Delete: {key}
+- Patch: {key, dtype, valueDelta}
 
 Server-to-client messages:
-- Value: {key, type, value}
-- Patch: {key, type, valueDelta}
+- SubscribeResponse: {agentId, clientId}
+- Value: {key, dtype, value}
+- Patch: {agentId, isLocal, key, dtype, valueDelta}
 
-Semantics: When client sends Subscribe, server will send Value followed by a
-stream of Patches for every object. Invariant: Server will never send Patch
-before Value for a given key.
+Semantics: When client sends Subscribe, server replies with SubscribeResponse,
+followed by Values for every object, followed by a never-ending stream of
+Patches for every object. Invariant: Server will never send Patch before Value
+for a given key.
 
-## Server-server communication
+## Server-server protocol
 
 Servers talk over WebSocket. As with client-server, server-server communication
 is message-based for now. Every server has an agent id, initialized to a random
@@ -143,11 +144,15 @@ Initiator-to-responder messages:
 - Subscribe: {agentId, versionVector}
 - Unsubscribe: {agentId}
 
-Semantics: When initiator sends Subscribe, responder starts streaming back
-Patches for every object. Starting point is determined by initiator's version
-vector.
+Responder-to-initiator messages:
+- SubscribeResponse: {agentId}
+- Patch: {agentId, agentSeq, key, dtype, valueDelta}
 
-TODO: Start by sending Value record, as in client-server interaction? CRDTs that
+Semantics: When initiator sends Subscribe, responder replies with
+SubscribeResponse followed by a never-ending stream of Patches for every object.
+Stream starting point is determined by initiator's version vector.
+
+TODO: Start by sending Value record, as in client-server protocol? CRDTs that
 support state merging would deal with this just fine.
 
 # Client implementation
@@ -162,7 +167,7 @@ should be able watch select keys.)
 - Built around an oplog (of patches) plus a key-value store (of values)
 - Oplog records contain sequence number, key, and value delta
 - Physical oplog is partitioned by originating agent id; each oplog record
-  contains a sequence number tracking its position in this particular server's
+  contains a sequence number tracking its position in this particular agent's
   logical oplog
 
 TODO: Is it even necessary to store sequence numbers in oplog records, given
@@ -172,9 +177,9 @@ replay order matches the true chronological partial order of events.
 ## Op handling
 
 Ops are processed atomically, as follows:
-1. Perform any sanity checks, e.g. data type checks
-1. Write patch to oplog
+1. Perform any sanity checks, e.g. dtype checks
 1. Apply patch to value in state store
+1. Write patch to oplog
 1. Use Sync.Cond.Broadcast to notify watching goroutines
 
 ## Client-server impl

@@ -1,6 +1,42 @@
-package dtypes
+package common
+
+import (
+	"encoding/json"
+	"strconv"
+)
 
 type VersionVector map[int]int
+
+var (
+	_ json.Marshaler   = (*VersionVector)(nil)
+	_ json.Unmarshaler = (*VersionVector)(nil)
+)
+
+// MarshalJSON marshals to JSON.
+func (vec *VersionVector) MarshalJSON() ([]byte, error) {
+	m := map[string]int{}
+	for k, v := range *vec {
+		m[strconv.Itoa(k)] = v
+	}
+	return json.Marshal(m)
+}
+
+// UnmarshalJSON unmarshals from JSON.
+func (vec *VersionVector) UnmarshalJSON(data []byte) error {
+	m := map[string]int{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	*vec = VersionVector{}
+	for k, v := range m {
+		ki, err := strconv.Atoi(k)
+		if err != nil {
+			return err
+		}
+		(*vec)[ki] = v
+	}
+	return nil
+}
 
 // Get returns the sequence number for the given agent.
 func (vec *VersionVector) Get(agentId int) (int, bool) {
