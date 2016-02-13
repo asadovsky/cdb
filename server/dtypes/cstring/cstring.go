@@ -259,6 +259,7 @@ func New() *CString {
 }
 
 // Value implements CValue.Value.
+// FIXME: Drop this method, here and elsewhere?
 func (s *CString) Value() interface{} {
 	return s.value
 }

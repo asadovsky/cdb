@@ -1,52 +1,21 @@
-// Document class.
+// CValue abstract class.
 
-'use strict';
+var EventEmitter = require('events').EventEmitter;
+var inherits = require('inherits');
 
-var AsyncModel = require('../editor').AsyncModel;
-var logoot = require('./logoot');
-var util = require('../util');
+inherits(CValue, EventEmitter);
+module.exports = CValue;
 
-module.exports = Document;
-
-function Document(addr, docId, onLoad) {
-  var that = this;
-
-  // Initialized by processSnapshotMsg_.
-  this.clientId_ = null;
-  this.m_ = null;
-
-  // Initialize WebSocket connection.
-  var ws = new WebSocket('ws://' + addr);
-
-  ws.onopen = function(e) {
-    that.ws_.sendMessage({
-      Type: 'Init',
-      DocId: docId,
-      DataType: 'crdt.Logoot'
-    });
-  };
-
-  ws.onmessage = function(e) {
-    var msg = JSON.parse(e.data);
-    switch (msg.Type) {
-    case 'Snapshot':
-      that.processSnapshotMsg_(msg);
-      onLoad(that);
-      return;
-    case 'Change':
-      that.processChangeMsg_(msg);
-      return;
-    default:
-      throw new Error('unknown message type: ' + msg.Type);
-    }
-  };
-
-  this.ws_ = util.decorateWebSocket(ws);
+function CValue() {
+  throw new Error('FIXME');
 }
 
-Document.prototype.getModel = function() {
-  return this.m_;
+// Returns a native JS type that represents this value.
+CValue.prototype.value = function() {
+  throw new Error('abstract method');
 };
+
+// FIXME: Move the stuff below to Collection and (mostly) to CString.
 
 ////////////////////////////////////////
 // Model event handlers
@@ -69,13 +38,6 @@ Document.prototype.handleReplaceText = function(pos, len, value) {
 
 ////////////////////////////////////////
 // Incoming message handlers
-
-Document.prototype.processSnapshotMsg_ = function(msg) {
-  console.assert(this.clientId_ === null);
-  this.clientId_ = msg.ClientId;
-  this.logoot_ = logoot.decodeLogoot(msg.LogootStr);
-  this.m_ = new AsyncModel(this, msg.Text);
-};
 
 Document.prototype.processChangeMsg_ = function(msg) {
   var that = this;

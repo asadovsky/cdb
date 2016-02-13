@@ -35,7 +35,7 @@ types from JS built-in types such as String.
 
 Methods:
 
-    openStore(hostname) => {err, Store}
+    openStore(addr) => {err, Store}
     s.getCollection('name') => {err, Collection}
     s.getOrCreateCollection('name') => {err, Collection, created}
     s.destroyCollection('name') => {err}

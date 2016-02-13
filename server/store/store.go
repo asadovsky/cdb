@@ -1,5 +1,7 @@
 package store
 
+// TODO: Add Collection layer.
+
 import (
 	"errors"
 	"sort"
