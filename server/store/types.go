@@ -1,14 +1,14 @@
 package store
 
 import (
-	"github.com/asadovsky/cdb/server/dtypes"
+	"github.com/asadovsky/cdb/server/dtypes/cvalue"
 )
 
 // ValueEnvelope represents a value and its associated metadata.
 // Key is of the form [Key], where Key is the object key.
 type ValueEnvelope struct {
 	DType string
-	Value dtypes.CValue
+	Value cvalue.CValue
 }
 
 // PatchEnvelope represents a patch and its associated metadata.

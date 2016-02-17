@@ -7,11 +7,6 @@ define BROWSERIFY
 	browserify $1 -d -t [ envify purge ] -o $2
 endef
 
-define BROWSERIFY_STANDALONE
-	@mkdir -p $(dir $2)
-	browserify $1 -s cdb.$3 -d -t [ envify purge ] -o $2
-endef
-
 .DELETE_ON_ERROR:
 
 all: build
@@ -23,9 +18,24 @@ node_modules: package.json
 
 .PHONY: build
 
+build: dist/demo.min.js
+dist/demo.min.js: demo/index.js node_modules
+	$(call BROWSERIFY,$<,$@)
+
+build: dist/demo
+dist/demo: $(shell find demo server)
+	go build -o $@ github.com/asadovsky/cdb/demo
+
 build: dist/server
 dist/server: $(shell find server)
 	go build -o $@ github.com/asadovsky/cdb/server
+
+########################################
+# Demos
+
+.PHONY: demo
+demo: build
+	dist/demo -port=4000 | xargs -n 1 -t open
 
 ########################################
 # Test, clean, and lint

@@ -4,14 +4,12 @@ var _ = require('lodash');
 
 var Conn = require('./conn');
 var cvalue = require('./dtypes/cvalue');
-var lib = require('./lib');
 var util = require('./dtypes/util');
 
 module.exports = Store;
 
-function Store(addr, name) {
+function Store(addr) {
   this.addr_ = addr;
-  this.name_ = name;
   // Map of key to CValue, populated from watch stream.
   this.m_ = {};
 }
@@ -32,6 +30,7 @@ Store.prototype.open = function(cb) {
     that.conn_.send({
       Type: 'SubscribeC2S'
     });
+    cb();
   });
 
   this.conn_.on('recv', function(msg) {
@@ -92,6 +91,7 @@ function checkDType(got, want) {
 // Gets the CValue for the given key. If opts.dtype is specified, checks that
 // the value has the given dtype.
 Store.prototype.get = function(key, opts) {
+  opts = opts || {};
   var value = this.m_[key];
   if (opts.dtype) {
     checkDType(value.dtype(), opts.dtype);
@@ -102,6 +102,7 @@ Store.prototype.get = function(key, opts) {
 // Gets the CValue for the given key. If the value already exists, checks that
 // it has the given dtype; otherwise, creates it with the given dtype.
 Store.prototype.getOrCreate = function(key, dtype, opts) {
+  opts = opts || {};
   var hasKey = _.has(this.m_, key);
   var value = hasKey ? this.m_[key] : util.newZeroValue(dtype);
   if (hasKey) {
@@ -112,14 +113,13 @@ Store.prototype.getOrCreate = function(key, dtype, opts) {
 
 // Puts the given value for the given key. Value must be a native JS type, and
 // will be converted to a CRegister.
-Store.prototype.put = function(key, value, opts, cb) {
+Store.prototype.put = function(key, value, opts) {
+  opts = opts || {};
   this.getOrCreate(key, 'cregister', {}).set(value);
 };
 
 // Deletes the specified record. If opts.failIfMissing is set, fails if there is
 // no record with the given key.
-Store.prototype.del = function(key, opts, cb) {
-  lib.setImmediate(function() {
-    cb(new Error('not implemented'));
-  });
+Store.prototype.del = function(key, opts) {
+  throw new Error('not implemented');
 };

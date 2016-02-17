@@ -11,9 +11,10 @@
     "react-dom": "global:ReactDOM"
   },
   "dependencies": {
-    "eddie": "0.0.3",
+    "eddie": "^0.1.0",
     "inherits": "^2.0.1",
-    "lodash": "^4.3.0"
+    "lodash": "^4.3.0",
+    "react-h-function": "^0.1.3"
   },
   "devDependencies": {
     "autoprefixer": "^6.1.2",
