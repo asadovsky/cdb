@@ -30,11 +30,15 @@ dist/server: $(shell find server)
 ########################################
 # Test, clean, and lint
 
+.PHONY: test
+test:
+	go test github.com/asadovsky/cdb/...
+
 .PHONY: clean
 clean:
 	rm -rf dist node_modules
 
 .PHONY: lint
 lint: node_modules
-	go vet github.com/asadovsky/cdb/server/...
+	go vet github.com/asadovsky/cdb/...
 	jshint .
