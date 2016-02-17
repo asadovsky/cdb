@@ -11,7 +11,7 @@
     "react-dom": "global:ReactDOM"
   },
   "dependencies": {
-    "eddie": "0.0.2",
+    "eddie": "0.0.3",
     "inherits": "^2.0.1",
     "lodash": "^4.3.0"
   },
