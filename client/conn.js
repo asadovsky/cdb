@@ -7,6 +7,7 @@ inherits(Conn, EventEmitter);
 module.exports = Conn;
 
 function Conn(addr) {
+  EventEmitter.call(this);
   var that = this;
   this.ws_ = new WebSocket('ws://' + addr);
 

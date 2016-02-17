@@ -1,14 +1,125 @@
 // Store class.
 
-var Collection = require('./collection');
+var _ = require('lodash');
+
+var Conn = require('./conn');
+var cvalue = require('./dtypes/cvalue');
+var lib = require('./lib');
+var util = require('./dtypes/util');
 
 module.exports = Store;
 
-function Store(addr) {
+function Store(addr, name) {
   this.addr_ = addr;
+  this.name_ = name;
+  // Map of key to CValue, populated from watch stream.
+  this.m_ = {};
 }
 
-// Returns a handle for the named collection.
-Store.prototype.getCollection = function(name, cb) {
-  return new Collection(this.addr_, name);
+// Opens this store, initiating the watch stream.
+// TODO: Eliminate this method once we've implemented fine-grained watch.
+Store.prototype.open = function(cb) {
+  var that = this;
+
+  // Initialized by processSubscribeResponseS2C_.
+  this.agentId_ = null;
+  this.clientId_ = null;
+
+  // Initialize connection.
+  this.conn_ = new Conn(this.addr_);
+
+  this.conn_.on('open', function() {
+    that.conn_.send({
+      Type: 'SubscribeC2S'
+    });
+  });
+
+  this.conn_.on('recv', function(msg) {
+    switch (msg.Type) {
+    case 'SubscribeResponseS2C':
+      return that.processSubscribeResponseS2C_(msg);
+    case 'ValueS2C':
+      return that.processValueS2C_(msg);
+    case 'PatchS2C':
+      return that.processPatchS2C_(msg);
+    default:
+      throw new Error('unknown message type: ' + msg.Type);
+    }
+  });
+};
+
+Store.prototype.processSubscribeResponseS2C_ = function(msg) {
+  this.agentId_ = msg.AgentId;
+  this.clientId_ = msg.ClientId;
+};
+
+// Helper for processValueS2C_ and processPatchS2C_.
+Store.prototype.putValue_ = function(key, dtype, value) {
+  var that = this;
+  this.m_[key] = value;
+  value.on('patch', function(patch) {
+    that.conn_.send({
+      Type: 'PatchC2S',
+      Key: key,
+      DType: dtype,
+      Patch: patch
+    });
+  });
+};
+
+Store.prototype.processValueS2C_ = function(msg) {
+  this.putValue_(msg.Key, msg.DType, util.decodeValue(msg.DType, msg.Value));
+};
+
+Store.prototype.processPatchS2C_ = function(msg) {
+  if (msg.DType === cvalue.dtypeDelete) {
+    throw new Error('not implemented');
+  }
+  var hasKey = _.has(this.m_, msg.Key);
+  var value = hasKey ? this.m_[msg.Key] : util.newZeroValue(msg.DType);
+  value.applyPatch(msg.IsLocal, msg.Patch);
+  if (!hasKey) {
+    this.putValue_(value);
+  }
+};
+
+function checkDType(got, want) {
+  if (got !== want) {
+    throw new Error('wrong dtype: got ' + got + ', want ' + want);
+  }
+}
+
+// Gets the CValue for the given key. If opts.dtype is specified, checks that
+// the value has the given dtype.
+Store.prototype.get = function(key, opts) {
+  var value = this.m_[key];
+  if (opts.dtype) {
+    checkDType(value.dtype(), opts.dtype);
+  }
+  return value;
+};
+
+// Gets the CValue for the given key. If the value already exists, checks that
+// it has the given dtype; otherwise, creates it with the given dtype.
+Store.prototype.getOrCreate = function(key, dtype, opts) {
+  var hasKey = _.has(this.m_, key);
+  var value = hasKey ? this.m_[key] : util.newZeroValue(dtype);
+  if (hasKey) {
+    checkDType(value.dtype(), dtype);
+  }
+  return value;
+};
+
+// Puts the given value for the given key. Value must be a native JS type, and
+// will be converted to a CRegister.
+Store.prototype.put = function(key, value, opts, cb) {
+  this.getOrCreate(key, 'cregister', {}).set(value);
+};
+
+// Deletes the specified record. If opts.failIfMissing is set, fails if there is
+// no record with the given key.
+Store.prototype.del = function(key, opts, cb) {
+  lib.setImmediate(function() {
+    cb(new Error('not implemented'));
+  });
 };

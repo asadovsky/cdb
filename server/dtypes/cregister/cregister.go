@@ -3,9 +3,11 @@ package cregister
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/asadovsky/cdb/server/common"
+	"github.com/asadovsky/cdb/server/dtypes/cvalue"
 )
 
 // CRegister is a CRDT register (last-one-wins).
@@ -22,9 +24,9 @@ func New() *CRegister {
 	return &CRegister{}
 }
 
-// Value implements CValue.Value.
-func (r *CRegister) Value() interface{} {
-	return r.Val
+// DType implements CValue.DType.
+func (r *CRegister) DType() string {
+	return cvalue.DTypeCRegister
 }
 
 // Encode implements CValue.Encode.
@@ -36,24 +38,45 @@ func (r *CRegister) Encode() (string, error) {
 	return string(buf), nil
 }
 
-func decodePatch(s string) (interface{}, error) {
-	var res interface{}
-	err := json.Unmarshal([]byte(s), &res)
-	return res, err
+// Decode decodes the given value into a CRegister.
+func Decode(s string) (*CRegister, error) {
+	return nil, errors.New("not implemented")
 }
 
-// ApplyPatch implements CValue.ApplyPatch.
-func (r *CRegister) ApplyPatch(agentId int, vec *common.VersionVector, t time.Time, patch string) (string, error) {
-	val, err := decodePatch(patch)
+func (r *CRegister) applyPatch(other *CRegister) {
+	if other.Vec.After(r.Vec) || (!other.Vec.Before(r.Vec) && (other.Time.After(r.Time) || (other.Time.Equal(r.Time) && other.AgentId > r.AgentId))) {
+		*r = *other
+	}
+}
+
+// ApplyServerPatch implements CValue.ApplyServerPatch.
+func (r *CRegister) ApplyServerPatch(patch string) error {
+	// For server patches, 'patch' is an encoded CRegister.
+	var other CRegister
+	if err := json.Unmarshal([]byte(patch), &other); err != nil {
+		return err
+	}
+	r.applyPatch(&other)
+	return nil
+}
+
+// ApplyClientPatch implements CValue.ApplyClientPatch.
+func (r *CRegister) ApplyClientPatch(agentId int, vec *common.VersionVector, t time.Time, patch string) (string, error) {
+	// For client patches, 'patch' is an encoded value.
+	var val interface{}
+	if err := json.Unmarshal([]byte(patch), &val); err != nil {
+		return "", err
+	}
+	other := &CRegister{
+		AgentId: agentId,
+		Vec:     vec,
+		Time:    t,
+		Val:     val,
+	}
+	res, err := other.Encode()
 	if err != nil {
 		return "", err
 	}
-	// TODO: If the patch had no effect on the value, perhaps we should avoid
-	// broadcasting it to subscribers.
-	if vec.After(r.Vec) || (!vec.Before(r.Vec) && (t.After(r.Time) || (t.Equal(r.Time) && agentId > r.AgentId))) {
-		r.AgentId = agentId
-		r.Time = t
-		r.Val = val
-	}
-	return patch, nil
+	r.applyPatch(other)
+	return res, nil
 }

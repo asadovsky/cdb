@@ -3,7 +3,6 @@ package store
 import (
 	"math"
 	"sync"
-	"time"
 
 	"github.com/asadovsky/cdb/server/common"
 )
@@ -34,12 +33,11 @@ func (l *Log) Wait(vec *common.VersionVector) {
 
 // push appends the given patch (from the given agent id) to the log and returns
 // the local sequence number for the written log record. cond.L must be held.
-func (l *Log) push(agentId int, t time.Time, key, dtype string, patch string) (int, error) {
+func (l *Log) push(agentId int, key, dtype string, patch string) (int, error) {
 	localSeq := l.nextLocalSeq
 	l.nextLocalSeq++
 	s := append(l.m[agentId], &PatchEnvelope{
 		LocalSeq: localSeq,
-		Time:     t,
 		Key:      key,
 		DType:    dtype,
 		Patch:    patch,

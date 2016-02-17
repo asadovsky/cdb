@@ -1,6 +1,5 @@
+// Package store defines Store, a key-value CRDT store.
 package store
-
-// TODO: Add Collection layer.
 
 import (
 	"errors"
@@ -9,7 +8,8 @@ import (
 	"time"
 
 	"github.com/asadovsky/cdb/server/common"
-	"github.com/asadovsky/cdb/server/dtypes"
+	"github.com/asadovsky/cdb/server/dtypes/cvalue"
+	"github.com/asadovsky/cdb/server/dtypes/util"
 )
 
 type Store struct {
@@ -33,16 +33,16 @@ func OpenStore(mu *sync.Mutex) *Store {
 
 // ApplyPatch applies the given encoded patch and returns the local sequence
 // number for the written log record. Mutex must be held.
-func (s *Store) ApplyPatch(agentId int, key string, dtype string, patch string) (int, error) {
+func (s *Store) ApplyPatch(agentId int, key string, dtype string, patch string, isClientPatch bool) (int, error) {
 	// TODO: Handle deletions in such a way that the deletion trumps concurrent
 	// ops on the deleted object. Seems we need a tombstone with an attached
 	// version vector.
-	if dtype == dtypes.DTypeDelete {
+	if dtype == cvalue.DTypeDelete {
 		return 0, errors.New("not implemented")
 	}
 	value, ok := s.m[key]
 	if !ok {
-		zeroValue, err := dtypes.NewZeroValue(dtype)
+		zeroValue, err := util.NewZeroValue(dtype)
 		if err != nil {
 			return 0, err
 		}
@@ -55,13 +55,17 @@ func (s *Store) ApplyPatch(agentId int, key string, dtype string, patch string) 
 		seq++
 	}
 	vec.Put(agentId, seq)
-	t := time.Now()
-	patch, err := value.Value.ApplyPatch(agentId, vec, t, patch)
+	var err error
+	if isClientPatch {
+		patch, err = value.Value.ApplyClientPatch(agentId, vec, time.Now(), patch)
+	} else {
+		value.Value.ApplyServerPatch(patch)
+	}
 	if err != nil {
 		return 0, err
 	}
 	// TODO: Commit changes iff there were no errors.
-	return s.Log.push(agentId, t, key, dtype, patch)
+	return s.Log.push(agentId, key, dtype, patch)
 }
 
 ////////////////////////////////////////////////////////////

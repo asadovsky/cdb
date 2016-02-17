@@ -172,7 +172,9 @@ func (s *stream) processPatchC2S(msg *PatchC2S) error {
 		return errors.New("not initialized")
 	}
 	// Update store and log.
-	localSeq, err := s.h.store.ApplyPatch(s.h.agentId, msg.Key, msg.DType, msg.Patch)
+	// TODO: If the patch had no effect on the value, perhaps we should avoid
+	// broadcasting it to subscribers.
+	localSeq, err := s.h.store.ApplyPatch(s.h.agentId, msg.Key, msg.DType, msg.Patch, true)
 	if err != nil {
 		return err
 	}

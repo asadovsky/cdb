@@ -1,8 +1,6 @@
 package store
 
 import (
-	"time"
-
 	"github.com/asadovsky/cdb/server/dtypes"
 )
 
@@ -19,7 +17,6 @@ type ValueEnvelope struct {
 // AgentId.
 type PatchEnvelope struct {
 	LocalSeq int // position in local, cross-agent patch log
-	Time     time.Time
 	Key      string
 	DType    string
 	Patch    string // encoded
