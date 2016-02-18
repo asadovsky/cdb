@@ -2,10 +2,9 @@ package common
 
 import (
 	"encoding/json"
-	"strconv"
 )
 
-type VersionVector map[int]int
+type VersionVector map[uint32]uint32
 
 var (
 	_ json.Marshaler   = (*VersionVector)(nil)
@@ -14,22 +13,22 @@ var (
 
 // MarshalJSON marshals to JSON.
 func (vec *VersionVector) MarshalJSON() ([]byte, error) {
-	m := map[string]int{}
+	m := map[string]uint32{}
 	for k, v := range *vec {
-		m[strconv.Itoa(k)] = v
+		m[Itoa(k)] = v
 	}
 	return json.Marshal(m)
 }
 
 // UnmarshalJSON unmarshals from JSON.
 func (vec *VersionVector) UnmarshalJSON(data []byte) error {
-	m := map[string]int{}
+	m := map[string]uint32{}
 	if err := json.Unmarshal(data, &m); err != nil {
 		return err
 	}
 	*vec = VersionVector{}
 	for k, v := range m {
-		ki, err := strconv.Atoi(k)
+		ki, err := Atoi(k)
 		if err != nil {
 			return err
 		}
@@ -39,13 +38,13 @@ func (vec *VersionVector) UnmarshalJSON(data []byte) error {
 }
 
 // Get returns the sequence number for the given agent.
-func (vec *VersionVector) Get(agentId int) (int, bool) {
+func (vec *VersionVector) Get(agentId uint32) (uint32, bool) {
 	seq, ok := (*vec)[agentId]
 	return seq, ok
 }
 
 // Put stores the given sequence number for the given agent.
-func (vec *VersionVector) Put(agentId, seq int) {
+func (vec *VersionVector) Put(agentId, seq uint32) {
 	(*vec)[agentId] = seq
 }
 

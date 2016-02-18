@@ -16,7 +16,7 @@ type ValueEnvelope struct {
 // id and [AgentSeq] is the position in the sequence of patches created by
 // AgentId.
 type PatchEnvelope struct {
-	LocalSeq int // position in local, cross-agent patch log
+	LocalSeq uint32 // position in local, cross-agent patch log
 	Key      string
 	DType    string
 	Patch    string // encoded

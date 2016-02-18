@@ -1,3 +1,4 @@
+// Package hub implements the CDB server.
 package hub
 
 import (
@@ -45,39 +46,41 @@ func jsonMarshal(v interface{}) []byte {
 // TODO: Hold list of peer addresses to talk to, and periodically attempt to
 // connect to each peer.
 type hub struct {
-	agentId      int
+	agentId      uint32
 	mu           sync.Mutex // protects the fields below
-	nextClientId int
+	nextClientId uint32
 	store        *store.Store
 }
 
 func newHub() *hub {
 	// TODO: Attempt to read agent id from persistent storage.
-	return &hub{
-		agentId: rand.Int(),
-	}
+	h := &hub{agentId: uint32(rand.Int31())}
+	h.store = store.OpenStore(&h.mu)
+	return h
 }
 
 type stream struct {
-	h    *hub
-	conn *websocket.Conn
+	h           *hub
+	conn        *websocket.Conn
+	initialized bool
 	// Populated if connection is from a client.
-	clientId *int
+	clientId uint32
 	// Queue of written local sequence numbers. Used to determine whether a log
 	// record originated from this client.
 	// TODO: Use a linked list or somesuch.
-	localSeqs []int
+	localSeqs []uint32
 	// Populated if connection is from a server (a peer).
-	agentId *int
+	agentId uint32
 	vec     *common.VersionVector
 }
 
 func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 	s.h.mu.Lock()
-	if s.clientId != nil || s.agentId != nil {
+	if s.initialized {
 		return errAlreadyInitialized
 	}
-	*s.clientId = s.h.nextClientId
+	s.initialized = true
+	s.clientId = s.h.nextClientId
 	s.h.nextClientId++
 	// While holding mu, snapshot current values and version vector.
 	valueMsgs := []ValueS2C{}
@@ -102,7 +105,7 @@ func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 	if err := s.conn.WriteJSON(&SubscribeResponseS2C{
 		Type:     "SubscribeResponseS2C",
 		AgentId:  s.h.agentId,
-		ClientId: *s.clientId,
+		ClientId: s.clientId,
 	}); err != nil {
 		return err
 	}
@@ -149,10 +152,11 @@ func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 
 func (s *stream) processSubscribeI2R(msg *SubscribeI2R) error {
 	s.h.mu.Lock()
-	if s.clientId != nil || s.agentId != nil {
+	if s.initialized {
 		return errAlreadyInitialized
 	}
-	*s.agentId = msg.AgentId
+	s.initialized = true
+	s.agentId = msg.AgentId
 	s.h.mu.Unlock()
 	res := &SubscribeResponseR2I{
 		Type:    "SubscribeResponseR2I",
@@ -168,7 +172,7 @@ func (s *stream) processSubscribeI2R(msg *SubscribeI2R) error {
 func (s *stream) processPatchC2S(msg *PatchC2S) error {
 	s.h.mu.Lock()
 	defer s.h.mu.Unlock()
-	if s.clientId != nil || s.agentId != nil {
+	if !s.initialized {
 		return errors.New("not initialized")
 	}
 	// Update store and log.

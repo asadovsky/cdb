@@ -24,7 +24,7 @@ func OpenStore(mu *sync.Mutex) *Store {
 	return &Store{
 		Log: &Log{
 			cond: sync.NewCond(mu),
-			m:    map[int][]*PatchEnvelope{},
+			m:    map[uint32][]*PatchEnvelope{},
 			head: &common.VersionVector{},
 		},
 		m: map[string]*ValueEnvelope{},
@@ -33,20 +33,21 @@ func OpenStore(mu *sync.Mutex) *Store {
 
 // ApplyPatch applies the given encoded patch and returns the local sequence
 // number for the written log record. Mutex must be held.
-func (s *Store) ApplyPatch(agentId int, key string, dtype string, patch string, isClientPatch bool) (int, error) {
+func (s *Store) ApplyPatch(agentId uint32, key string, dtype string, patch string, isClientPatch bool) (uint32, error) {
 	// TODO: Handle deletions in such a way that the deletion trumps concurrent
 	// ops on the deleted object. Seems we need a tombstone with an attached
 	// version vector.
 	if dtype == cvalue.DTypeDelete {
 		return 0, errors.New("not implemented")
 	}
-	value, ok := s.m[key]
+	valueEnv, ok := s.m[key]
 	if !ok {
 		zeroValue, err := util.NewZeroValue(dtype)
 		if err != nil {
 			return 0, err
 		}
-		s.m[key] = &ValueEnvelope{DType: dtype, Value: zeroValue}
+		valueEnv = &ValueEnvelope{DType: dtype, Value: zeroValue}
+		s.m[key] = valueEnv
 	}
 	// Build incremented version vector to pass to Value.ApplyPatch.
 	vec := s.Log.Head()
@@ -57,9 +58,9 @@ func (s *Store) ApplyPatch(agentId int, key string, dtype string, patch string, 
 	vec.Put(agentId, seq)
 	var err error
 	if isClientPatch {
-		patch, err = value.Value.ApplyClientPatch(agentId, vec, time.Now(), patch)
+		patch, err = valueEnv.Value.ApplyClientPatch(agentId, vec, time.Now(), patch)
 	} else {
-		value.Value.ApplyServerPatch(patch)
+		valueEnv.Value.ApplyServerPatch(patch)
 	}
 	if err != nil {
 		return 0, err

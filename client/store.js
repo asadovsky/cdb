@@ -52,8 +52,7 @@ Store.prototype.processSubscribeResponseS2C_ = function(msg) {
   this.clientId_ = msg.ClientId;
 };
 
-// Helper for processValueS2C_ and processPatchS2C_.
-Store.prototype.putValue_ = function(key, dtype, value) {
+Store.prototype.putAndWatch_ = function(key, dtype, value) {
   var that = this;
   this.m_[key] = value;
   value.on('patch', function(patch) {
@@ -67,7 +66,7 @@ Store.prototype.putValue_ = function(key, dtype, value) {
 };
 
 Store.prototype.processValueS2C_ = function(msg) {
-  this.putValue_(msg.Key, msg.DType, util.decodeValue(msg.DType, msg.Value));
+  this.putAndWatch_(msg.Key, msg.DType, util.decodeValue(msg.DType, msg.Value));
 };
 
 Store.prototype.processPatchS2C_ = function(msg) {
@@ -78,7 +77,7 @@ Store.prototype.processPatchS2C_ = function(msg) {
   var value = hasKey ? this.m_[msg.Key] : util.newZeroValue(msg.DType);
   value.applyPatch(msg.IsLocal, msg.Patch);
   if (!hasKey) {
-    this.putValue_(value);
+    this.putAndWatch_(value);
   }
 };
 
@@ -103,10 +102,13 @@ Store.prototype.get = function(key, opts) {
 // it has the given dtype; otherwise, creates it with the given dtype.
 Store.prototype.getOrCreate = function(key, dtype, opts) {
   opts = opts || {};
-  var hasKey = _.has(this.m_, key);
-  var value = hasKey ? this.m_[key] : util.newZeroValue(dtype);
+  var hasKey = _.has(this.m_, key), value;
   if (hasKey) {
+    value = this.m_[key];
     checkDType(value.dtype(), dtype);
+  } else {
+    value = util.newZeroValue(dtype);
+    this.putAndWatch_(key, dtype, value);
   }
   return value;
 };

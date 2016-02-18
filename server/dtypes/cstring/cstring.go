@@ -10,7 +10,6 @@ import (
 	"math"
 	"math/rand"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -27,13 +26,13 @@ func assert(b bool, v ...interface{}) {
 // id is a Logoot identifier.
 type id struct {
 	Pos     uint32
-	AgentId int
+	AgentId uint32
 }
 
 // pid is a Logoot position identifier.
 type pid struct {
 	Ids []id
-	Seq int // logical clock value for the last id's agent
+	Seq uint32 // logical clock value for the last id's agent
 }
 
 // Less returns true iff p is less than other.
@@ -75,7 +74,7 @@ func (p *pid) Encode() string {
 	for i, v := range p.Ids {
 		idStrs[i] = fmt.Sprintf("%d.%d", v.Pos, v.AgentId)
 	}
-	return strings.Join(idStrs, ":") + "~" + strconv.Itoa(p.Seq)
+	return strings.Join(idStrs, ":") + "~" + common.Itoa(p.Seq)
 }
 
 // decodePid decodes the given string into a pid.
@@ -84,7 +83,7 @@ func decodePid(s string) (*pid, error) {
 	if len(idsAndSeq) != 2 {
 		return nil, fmt.Errorf("invalid pid: %s", s)
 	}
-	seq, err := strconv.Atoi(idsAndSeq[1])
+	seq, err := common.Atoi(idsAndSeq[1])
 	if err != nil {
 		return nil, fmt.Errorf("invalid seq: %s", s)
 	}
@@ -95,11 +94,11 @@ func decodePid(s string) (*pid, error) {
 		if len(parts) != 2 {
 			return nil, fmt.Errorf("invalid id: %s", v)
 		}
-		pos, err := strconv.ParseUint(parts[0], 10, 32)
+		pos, err := common.Atoi(parts[0])
 		if err != nil {
 			return nil, fmt.Errorf("invalid pos: %s", v)
 		}
-		agentId, err := strconv.Atoi(parts[1])
+		agentId, err := common.Atoi(parts[1])
 		if err != nil {
 			return nil, fmt.Errorf("invalid agentId: %s", v)
 		}
@@ -311,7 +310,7 @@ func (s *CString) ApplyServerPatch(patch string) error {
 }
 
 // ApplyClientPatch implements CValue.ApplyClientPatch.
-func (s *CString) ApplyClientPatch(agentId int, vec *common.VersionVector, _ time.Time, patch string) (string, error) {
+func (s *CString) ApplyClientPatch(agentId uint32, vec *common.VersionVector, _ time.Time, patch string) (string, error) {
 	agentSeq, ok := vec.Get(agentId)
 	if !ok {
 		return "", fmt.Errorf("unknown agent: %d", agentId)
@@ -357,7 +356,7 @@ func randUint32Between(prev, next uint32) uint32 {
 // TODO: Smarter pid allocation, e.g. LSEQ. Also, maybe do something to ensure
 // that concurrent multi-atom insertions from different agents do not get
 // interleaved.
-func genIds(agentId int, prev, next []id) []id {
+func genIds(agentId uint32, prev, next []id) []id {
 	if len(prev) == 0 {
 		prev = []id{{Pos: 0, AgentId: agentId}}
 	}
@@ -370,7 +369,7 @@ func genIds(agentId int, prev, next []id) []id {
 	return append([]id{prev[0]}, genIds(agentId, prev[1:], next[1:])...)
 }
 
-func genPid(agentId, agentSeq int, prev, next *pid) *pid {
+func genPid(agentId, agentSeq uint32, prev, next *pid) *pid {
 	prevIds, nextIds := []id{}, []id{}
 	if prev != nil {
 		prevIds = prev.Ids

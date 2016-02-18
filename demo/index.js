@@ -6,7 +6,7 @@ var React = require('react'), h = require('react-h-function')(React);
 var ReactDOM = require('react-dom');
 var url = require('url');
 
-var store = require('../client/store');
+var Store = require('../client/store');
 
 function newEditor(el, type, model) {
   if (type === 'eddie') {
@@ -21,7 +21,7 @@ var Editor = React.createFactory(React.createClass({
   displayName: 'Editor',
   componentDidMount: function() {
     var that = this, el = ReactDOM.findDOMNode(this);
-    var st = new store.Store(this.props.addr);
+    var st = new Store(this.props.addr);
     st.open(function() {
       var model = st.getOrCreate('0', 'cstring');
       var ed = newEditor(el, that.props.type, model);

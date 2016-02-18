@@ -13,7 +13,7 @@ import (
 // CRegister is a CRDT register (last-one-wins).
 // Fields are exported to support CRegister.Encode.
 type CRegister struct {
-	AgentId int
+	AgentId uint32
 	Vec     *common.VersionVector
 	Time    time.Time
 	Val     interface{}
@@ -61,7 +61,7 @@ func (r *CRegister) ApplyServerPatch(patch string) error {
 }
 
 // ApplyClientPatch implements CValue.ApplyClientPatch.
-func (r *CRegister) ApplyClientPatch(agentId int, vec *common.VersionVector, t time.Time, patch string) (string, error) {
+func (r *CRegister) ApplyClientPatch(agentId uint32, vec *common.VersionVector, t time.Time, patch string) (string, error) {
 	// For client patches, 'patch' is an encoded value.
 	var val interface{}
 	if err := json.Unmarshal([]byte(patch), &val); err != nil {

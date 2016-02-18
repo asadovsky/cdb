@@ -30,5 +30,5 @@ type CValue interface {
 	// an encoded "server patch" suitable for persistent storage. The provided
 	// patch may include client-only operations; the returned patch will never
 	// contain such operations.
-	ApplyClientPatch(agentId int, vec *common.VersionVector, t time.Time, patch string) (string, error)
+	ApplyClientPatch(agentId uint32, vec *common.VersionVector, t time.Time, patch string) (string, error)
 }

@@ -19,7 +19,7 @@ node_modules: package.json
 .PHONY: build
 
 build: dist/demo.min.js
-dist/demo.min.js: demo/index.js node_modules
+dist/demo.min.js: demo/index.js $(shell find client) node_modules
 	$(call BROWSERIFY,$<,$@)
 
 build: dist/demo
@@ -33,8 +33,8 @@ dist/server: $(shell find server)
 ########################################
 # Demos
 
-.PHONY: demo
-demo: build
+.PHONY: demo-store
+demo-store: build
 	dist/demo -port=4000 | xargs -n 1 -t open
 
 ########################################

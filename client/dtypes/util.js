@@ -22,7 +22,7 @@ exports.newZeroValue = function(dtype) {
   case cvalue.dtypeCRegister:
     return new cregister.CRegister(undefined);
   case cvalue.dtypeCString:
-    return new cstring.CString('');
+    return new cstring.CString([]);
   default:
     throw new Error('unknown dtype: ' + dtype);
   }

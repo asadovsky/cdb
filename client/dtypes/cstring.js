@@ -1,5 +1,6 @@
 // CString class.
 // Mostly mirrors server/dtypes/cstring/cstring.go.
+// By design, satisfies the require('eddie').Model interface.
 
 var _ = require('lodash');
 var inherits = require('inherits');
@@ -38,6 +39,14 @@ function Pid(ids, seq) {
   this.seq = seq;
 }
 
+function number(s) {
+  var n = Number(s);
+  if (s === '' || isNaN(n)) {
+    throw new Error('not a number: ' + s);
+  }
+  return n
+}
+
 Pid.prototype.less = function(other) {
   for (var i = 0; i < this.ids.length; i++) {
     if (i === other.ids.length) {
@@ -67,13 +76,13 @@ function decodePid(s) {
   if (idsAndSeq.length !== 2 ) {
     throw new Error('invalid pid: ' + s);
   }
-  var seq = Number(idsAndSeq[1]);
-  var ids = _.map(s.split(':'), function(idStr) {
+  var seq = number(idsAndSeq[1]);
+  var ids = _.map(idsAndSeq[0].split(':'), function(idStr) {
     var parts = idStr.split('.');
     if (parts.length !== 2) {
       throw new Error('invalid id: ' + idStr);
     }
-    return new Id(Number(parts[0]), Number(parts[1]));
+    return new Id(number(parts[0]), number(parts[1]));
   });
   return new Pid(ids, seq);
 }
@@ -81,7 +90,7 @@ function decodePid(s) {
 function Op() {}
 
 Op.prototype.encode = function() {
-  throw new Error('abstract method');
+  throw new Error('not implemented');
 };
 
 inherits(ClientInsert, Op);
@@ -217,7 +226,7 @@ CString.prototype.applyPatch = function(isLocal, patch) {
   for (var i = 0; i < ops.length; i++) {
     var op = ops[i];
     switch(op.constructor.name) {
-    case 'insert':
+    case 'Insert':
       var insertPos = this.search_(op.pid);
       this.atoms_.splice(insertPos, 0, new Atom(op.pid, op.value));
       if (insertPos === pos + value.length) {
@@ -229,7 +238,7 @@ CString.prototype.applyPatch = function(isLocal, patch) {
         value = op.value;
       }
       break;
-    case 'delete':
+    case 'Delete':
       var deletePos = this.search_(op.pid);
       this.atoms_.splice(deletePos, 1);
       if (deletePos === pos) {
