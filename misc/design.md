@@ -170,9 +170,9 @@ should be able watch select keys.)
   contains a sequence number tracking its position in this particular agent's
   logical oplog
 
-TODO: Is it even necessary to store sequence numbers in oplog records, given
-that CRDT operations are commutative? Perhaps it's nice to ensure that log
-replay order matches the true chronological partial order of events.
+Note: We store sequence numbers in oplog records so that operations get executed
+in the same partial order at every agent, thus satisfying causality. (Some
+CRDTs, including Logoot, require this property.)
 
 ## Op handling
 
