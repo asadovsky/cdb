@@ -3,7 +3,8 @@ package hub
 // Note: We use uint32 (rather than uint64) in various places to ensure that
 // these numbers are representable in JavaScript.
 
-// For detecting incoming message type.
+// For detecting incoming message type. Each struct below has Type set to the
+// struct type name.
 type MsgType struct {
 	Type string
 }
@@ -36,6 +37,10 @@ type ValueS2C struct {
 	Key   string
 	DType string
 	Value string // encoded
+}
+
+type ValuesDoneS2C struct {
+	Type string
 }
 
 type PatchS2C struct {

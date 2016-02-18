@@ -109,44 +109,17 @@ func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 	}); err != nil {
 		return err
 	}
-	for valueMsg := range valueMsgs {
+	for _, valueMsg := range valueMsgs {
 		if err := s.conn.WriteJSON(valueMsg); err != nil {
 			return err
 		}
 	}
-	// Start streaming patches.
-	// TODO: This goroutine should exit if the stream has broken.
-	go func() {
-		// TODO: Better error handling.
-		for {
-			s.h.store.Log.Wait(vec)
-			it := s.h.store.Log.NewIterator(vec)
-			for {
-				s.h.mu.Lock()
-				advanced := it.Advance()
-				s.h.mu.Unlock()
-				if !advanced {
-					break
-				}
-				vec = it.VersionVector()
-				patch := it.Patch()
-				isLocal := false
-				if len(s.localSeqs) > 0 && s.localSeqs[0] == patch.LocalSeq {
-					isLocal = true
-					s.localSeqs = s.localSeqs[1:]
-				}
-				ok(s.conn.WriteJSON(&PatchS2C{
-					Type:    "PatchS2C",
-					AgentId: it.AgentId(),
-					IsLocal: isLocal,
-					Key:     patch.Key,
-					DType:   patch.DType,
-					Patch:   patch.Patch,
-				}))
-			}
-			ok(it.Err())
-		}
-	}()
+	if err := s.conn.WriteJSON(&ValuesDoneS2C{
+		Type: "ValuesDoneS2C",
+	}); err != nil {
+		return err
+	}
+	go s.streamPatches(vec)
 	return nil
 }
 
@@ -158,11 +131,10 @@ func (s *stream) processSubscribeI2R(msg *SubscribeI2R) error {
 	s.initialized = true
 	s.agentId = msg.AgentId
 	s.h.mu.Unlock()
-	res := &SubscribeResponseR2I{
+	if err := s.conn.WriteJSON(&SubscribeResponseR2I{
 		Type:    "SubscribeResponseR2I",
 		AgentId: s.h.agentId,
-	}
-	if err := s.conn.WriteJSON(res); err != nil {
+	}); err != nil {
 		return err
 	}
 	// TODO: Start streaming patches.
@@ -186,18 +158,58 @@ func (s *stream) processPatchC2S(msg *PatchC2S) error {
 	return nil
 }
 
+// streamPatches streams patches to the client until the connection is closed.
+func (s *stream) streamPatches(vec *common.VersionVector) {
+	go func() {
+		closed := false
+		for !closed {
+			s.h.store.Log.Wait(vec)
+			it := s.h.store.Log.NewIterator(vec)
+			for {
+				s.h.mu.Lock()
+				advanced := it.Advance()
+				s.h.mu.Unlock()
+				if !advanced {
+					break
+				}
+				vec = it.VersionVector()
+				patch := it.Patch()
+				isLocal := false
+				if len(s.localSeqs) > 0 && s.localSeqs[0] == patch.LocalSeq {
+					isLocal = true
+					s.localSeqs = s.localSeqs[1:]
+				}
+				err := s.conn.WriteJSON(&PatchS2C{
+					Type:    "PatchS2C",
+					AgentId: it.AgentId(),
+					IsLocal: isLocal,
+					Key:     patch.Key,
+					DType:   patch.DType,
+					Patch:   patch.Patch,
+				})
+				if err == websocket.ErrCloseSent {
+					closed = true
+					break
+				}
+				ok(err)
+			}
+			ok(it.Err())
+		}
+	}()
+}
+
 func (h *hub) handleConn(w http.ResponseWriter, r *http.Request) {
 	const bufSize = 1024
 	conn, err := websocket.Upgrade(w, r, nil, bufSize, bufSize)
 	ok(err)
 	s := &stream{h: h, conn: conn}
-	eof, done := make(chan struct{}), make(chan struct{})
+	done := make(chan struct{})
 
 	go func() {
 		for {
 			_, buf, err := conn.ReadMessage()
-			if ce, ok := err.(*websocket.CloseError); ok && (ce.Code == websocket.CloseNormalClosure || ce.Code == websocket.CloseGoingAway) {
-				close(eof)
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				close(done)
 				return
 			}
 			ok(err)

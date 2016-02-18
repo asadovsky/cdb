@@ -30,7 +30,6 @@ Store.prototype.open = function(cb) {
     that.conn_.send({
       Type: 'SubscribeC2S'
     });
-    cb();
   });
 
   this.conn_.on('recv', function(msg) {
@@ -39,6 +38,8 @@ Store.prototype.open = function(cb) {
       return that.processSubscribeResponseS2C_(msg);
     case 'ValueS2C':
       return that.processValueS2C_(msg);
+    case 'ValuesDoneS2C':
+      return cb();
     case 'PatchS2C':
       return that.processPatchS2C_(msg);
     default:
@@ -92,6 +93,9 @@ function checkDType(got, want) {
 Store.prototype.get = function(key, opts) {
   opts = opts || {};
   var value = this.m_[key];
+  if (value === undefined) {
+    throw new Error('not found: ' + key);
+  }
   if (opts.dtype) {
     checkDType(value.dtype(), opts.dtype);
   }

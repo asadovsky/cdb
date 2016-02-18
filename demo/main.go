@@ -53,7 +53,7 @@ func main() {
 		ok(err)
 	}
 	addr := fmt.Sprintf("%s:%d", hostname, *port)
-	httpAddr := fmt.Sprintf("%s:8080", hostname)
+	httpAddr := fmt.Sprintf("%s:8081", hostname)
 	c := sh.FuncCmd(serve, addr)
 	c.AddStderrWriter(os.Stderr)
 	c.Start()

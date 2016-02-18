@@ -35,7 +35,7 @@ dist/server: $(shell find server)
 
 .PHONY: demo-store
 demo-store: build
-	dist/demo -port=4000 | xargs -n 1 -t open
+	dist/demo -port=4001 | xargs -n 1 -t open
 
 ########################################
 # Test, clean, and lint
