@@ -1,5 +1,13 @@
 // Utility functions.
 
+exports.atoi = function(s) {
+  var n = Number(s);
+  if (s === '' || isNaN(n)) {
+    throw new Error('not a number: ' + s);
+  }
+  return n;
+};
+
 exports.setImmediate = function(cb) {
   window.setTimeout(cb, 0);
 };

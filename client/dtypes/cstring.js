@@ -39,14 +39,6 @@ function Pid(ids, seq) {
   this.seq = seq;
 }
 
-function number(s) {
-  var n = Number(s);
-  if (s === '' || isNaN(n)) {
-    throw new Error('not a number: ' + s);
-  }
-  return n;
-}
-
 Pid.prototype.less = function(other) {
   for (var i = 0; i < this.ids.length; i++) {
     if (i === other.ids.length) {
@@ -76,13 +68,13 @@ function decodePid(s) {
   if (idsAndSeq.length !== 2 ) {
     throw new Error('invalid pid: ' + s);
   }
-  var seq = number(idsAndSeq[1]);
+  var seq = lib.atoi(idsAndSeq[1]);
   var ids = _.map(idsAndSeq[0].split(':'), function(idStr) {
     var parts = idStr.split('.');
     if (parts.length !== 2) {
       throw new Error('invalid id: ' + idStr);
     }
-    return new Id(number(parts[0]), number(parts[1]));
+    return new Id(lib.atoi(parts[0]), lib.atoi(parts[1]));
   });
   return new Pid(ids, seq);
 }
