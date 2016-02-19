@@ -172,7 +172,7 @@ should be able watch select keys.)
 
 Note: We store sequence numbers in oplog records so that operations get executed
 in the same partial order at every agent, thus satisfying causality. (Some
-CRDTs, including Logoot, require this property.)
+CRDTs, including Logoot but not Logoot-Undo, require this property.)
 
 ## Op handling
 

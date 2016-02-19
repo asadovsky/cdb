@@ -43,7 +43,7 @@ func (l *Log) push(agentId uint32, key, dtype string, patch string) (uint32, err
 		Patch:    patch,
 	})
 	l.m[agentId] = s
-	l.head.Put(agentId, uint32(len(s)))
+	l.head.Put(agentId, uint32(len(s)-1))
 	l.cond.Broadcast()
 	return localSeq, nil
 }
