@@ -44,7 +44,7 @@ function number(s) {
   if (s === '' || isNaN(n)) {
     throw new Error('not a number: ' + s);
   }
-  return n
+  return n;
 }
 
 Pid.prototype.less = function(other) {
