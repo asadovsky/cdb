@@ -3,6 +3,8 @@ package store
 
 import (
 	"errors"
+	"fmt"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -11,6 +13,16 @@ import (
 	"github.com/asadovsky/cdb/server/dtypes/cvalue"
 	"github.com/asadovsky/cdb/server/dtypes/util"
 )
+
+var (
+	errNotImplemented = errors.New("not implemented")
+)
+
+func assert(b bool, v ...interface{}) {
+	if !b {
+		panic(fmt.Sprint(v...))
+	}
+}
 
 type Store struct {
 	Log *Log
@@ -31,37 +43,63 @@ func OpenStore(mu *sync.Mutex) *Store {
 	}
 }
 
-// ApplyPatch applies the given encoded patch and returns the local sequence
-// number for the written log record. Mutex must be held.
-func (s *Store) ApplyPatch(agentId uint32, key string, dtype string, patch string, isClientPatch bool) (uint32, error) {
-	// TODO: Handle deletions in such a way that the deletion trumps concurrent
-	// ops on the deleted object. Seems we need a tombstone with an attached
-	// version vector.
-	if dtype == cvalue.DTypeDelete {
-		return 0, errors.New("not implemented")
-	}
+func (s *Store) getOrCreateValueEnvelope(key, dtype string) (*ValueEnvelope, error) {
 	valueEnv, ok := s.m[key]
 	if !ok {
 		zeroValue, err := util.NewZeroValue(dtype)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		valueEnv = &ValueEnvelope{DType: dtype, Value: zeroValue}
 		s.m[key] = valueEnv
 	}
+	return valueEnv, nil
+}
+
+// TODO: Make it so a deletion trumps any concurrent ops on the deleted object.
+// In other words, the key-value store should behave like a map CRDT. Seems we
+// need a tombstone with an attached version vector.
+
+// ApplyServerPatch applies the given encoded patch, if needed. Mutex must be
+// held.
+func (s *Store) ApplyServerPatch(agentId, agentSeq uint32, key, dtype, patch string) error {
+	if dtype == cvalue.DTypeDelete {
+		return errNotImplemented
+	}
+	vec := s.Log.Head()
+	wantSeq := vec.Get(agentId) + 1
+	if agentSeq > wantSeq {
+		return fmt.Errorf("unexpected patch for agent %d: got %d, want %d", agentId, agentSeq, wantSeq)
+	} else if agentSeq < wantSeq {
+		log.Printf("already got patch for agent %d: got %d, want %d", agentId, agentSeq, wantSeq)
+		return nil
+	}
+	ve, err := s.getOrCreateValueEnvelope(key, dtype)
+	if err != nil {
+		return err
+	}
+	if err := ve.Value.ApplyServerPatch(patch); err != nil {
+		return err
+	}
+	// TODO: Commit changes iff there were no errors.
+	_, err = s.Log.push(agentId, key, dtype, patch)
+	return err
+}
+
+// ApplyClientPatch applies the given encoded patch and returns the local
+// sequence number for the written log record. Mutex must be held.
+func (s *Store) ApplyClientPatch(agentId uint32, key, dtype, patch string) (uint32, error) {
+	if dtype == cvalue.DTypeDelete {
+		return 0, errNotImplemented
+	}
 	// Build incremented version vector to pass to Value.ApplyPatch.
 	vec := s.Log.Head()
-	seq, ok := vec.Get(agentId)
-	if ok {
-		seq++
+	vec.Put(agentId, vec.Get(agentId)+1)
+	ve, err := s.getOrCreateValueEnvelope(key, dtype)
+	if err != nil {
+		return 0, err
 	}
-	vec.Put(agentId, seq)
-	var err error
-	if isClientPatch {
-		patch, err = valueEnv.Value.ApplyClientPatch(agentId, vec, time.Now(), patch)
-	} else {
-		valueEnv.Value.ApplyServerPatch(patch)
-	}
+	patch, err = ve.Value.ApplyClientPatch(agentId, vec, time.Now(), patch)
 	if err != nil {
 		return 0, err
 	}

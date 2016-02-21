@@ -33,9 +33,13 @@ dist/server: $(shell find server)
 ########################################
 # Demos
 
-.PHONY: demo-store
-demo-store: build
-	dist/demo -port=4001 | xargs -n 1 -t open
+.PHONY: demo-alice
+demo-alice: build
+	dist/demo -port=4001 -peer-addrs=localhost:4002
+
+.PHONY: demo-bob
+demo-bob: build
+	dist/demo -port=4002 -peer-addrs=localhost:4001
 
 ########################################
 # Test, clean, and lint

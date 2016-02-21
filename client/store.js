@@ -19,10 +19,6 @@ function Store(addr) {
 Store.prototype.open = function(cb) {
   var that = this;
 
-  // Initialized by processSubscribeResponseS2C_.
-  this.agentId_ = null;
-  this.clientId_ = null;
-
   // Initialize connection.
   this.conn_ = new Conn(this.addr_);
 
@@ -34,8 +30,6 @@ Store.prototype.open = function(cb) {
 
   this.conn_.on('recv', function(msg) {
     switch (msg.Type) {
-    case 'SubscribeResponseS2C':
-      return that.processSubscribeResponseS2C_(msg);
     case 'ValueS2C':
       return that.processValueS2C_(msg);
     case 'ValuesDoneS2C':
@@ -46,11 +40,6 @@ Store.prototype.open = function(cb) {
       throw new Error('unknown message type: ' + msg.Type);
     }
   });
-};
-
-Store.prototype.processSubscribeResponseS2C_ = function(msg) {
-  this.agentId_ = msg.AgentId;
-  this.clientId_ = msg.ClientId;
 };
 
 Store.prototype.putAndWatch_ = function(key, dtype, value) {

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/asadovsky/gosh"
 
@@ -16,10 +17,12 @@ import (
 )
 
 var (
-	loopback = flag.Bool("loopback", true, "")
-	port     = flag.Int("port", 4000, "")
-	serve    = gosh.RegisterFunc("serve", hub.Serve)
+	loopback  = flag.Bool("loopback", true, "")
+	port      = flag.Int("port", 4000, "")
+	peerAddrs = flag.String("peer-addrs", "", "comma-separated peer addrs")
 )
+
+var serve = gosh.RegisterFunc("serve", hub.Serve)
 
 func ok(err error) {
 	if err != nil {
@@ -53,8 +56,8 @@ func main() {
 		ok(err)
 	}
 	addr := fmt.Sprintf("%s:%d", hostname, *port)
-	httpAddr := fmt.Sprintf("%s:8081", hostname)
-	c := sh.FuncCmd(serve, addr)
+	httpAddr := fmt.Sprintf("%s:%d", hostname, *port+100)
+	c := sh.FuncCmd(serve, addr, strings.Split(*peerAddrs, ","))
 	c.AddStderrWriter(os.Stderr)
 	c.Start()
 	c.AwaitVars("ready")

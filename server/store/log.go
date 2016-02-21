@@ -10,9 +10,9 @@ import (
 type Log struct {
 	cond *sync.Cond
 	// Maps agent id to patches created by that agent.
-	m            map[uint32][]*PatchEnvelope
-	head         *common.VersionVector
-	nextLocalSeq uint32
+	m        map[uint32][]*PatchEnvelope
+	head     *common.VersionVector
+	localSeq uint32
 }
 
 // Head returns a new version vector representing current knowledge. cond.L must
@@ -34,18 +34,17 @@ func (l *Log) Wait(vec *common.VersionVector) {
 // push appends the given patch (from the given agent id) to the log and returns
 // the local sequence number for the written log record. cond.L must be held.
 func (l *Log) push(agentId uint32, key, dtype string, patch string) (uint32, error) {
-	localSeq := l.nextLocalSeq
-	l.nextLocalSeq++
+	l.localSeq++
 	s := append(l.m[agentId], &PatchEnvelope{
-		LocalSeq: localSeq,
+		LocalSeq: l.localSeq,
 		Key:      key,
 		DType:    dtype,
 		Patch:    patch,
 	})
 	l.m[agentId] = s
-	l.head.Put(agentId, uint32(len(s)-1))
+	l.head.Put(agentId, uint32(len(s)))
 	l.cond.Broadcast()
-	return localSeq, nil
+	return l.localSeq, nil
 }
 
 ////////////////////////////////////////////////////////////
@@ -71,12 +70,9 @@ func (l *Log) NewIterator(vec *common.VersionVector) *LogIterator {
 func (it *LogIterator) Advance() bool {
 	var minLocalSeq, advAgentId, advAgentSeq uint32 = math.MaxUint32, 0, 0
 	for agentId, patches := range it.l.m {
-		agentSeq, ok := it.vec.Get(agentId)
-		if ok {
-			agentSeq++
-		}
+		agentSeq := it.vec.Get(agentId)
 		if agentSeq < uint32(len(patches)) && patches[agentSeq].LocalSeq < minLocalSeq {
-			minLocalSeq, advAgentId, advAgentSeq = patches[agentSeq].LocalSeq, agentId, agentSeq
+			minLocalSeq, advAgentId, advAgentSeq = patches[agentSeq].LocalSeq, agentId, agentSeq+1
 		}
 	}
 	if minLocalSeq == math.MaxUint32 {
@@ -89,12 +85,17 @@ func (it *LogIterator) Advance() bool {
 
 // Value returns the current patch.
 func (it *LogIterator) Patch() *PatchEnvelope {
-	return it.l.m[it.agentId][it.agentSeq]
+	return it.l.m[it.agentId][it.agentSeq-1]
 }
 
-// AgentId returns the agent id that produced the current patch.
+// AgentId returns the agent id for the current patch.
 func (it *LogIterator) AgentId() uint32 {
 	return it.agentId
+}
+
+// AgentSeq returns the agent sequence number for the current patch.
+func (it *LogIterator) AgentSeq() uint32 {
+	return it.agentSeq
 }
 
 // VersionVector returns a copy of the current version vector, representing

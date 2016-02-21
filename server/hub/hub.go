@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math/rand"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,33 +45,97 @@ func jsonMarshal(v interface{}) []byte {
 	return buf
 }
 
-// TODO: Hold list of peer addresses to talk to, and periodically attempt to
-// connect to each peer.
-type hub struct {
-	agentId      uint32
-	mu           sync.Mutex // protects the fields below
-	nextClientId uint32
-	store        *store.Store
+func isCloseError(err error) bool {
+	return websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure)
 }
 
-func newHub() *hub {
+type hub struct {
+	agentId uint32
+	addr    string
+	mu      sync.Mutex // protects the fields below
+	store   *store.Store
+	peers   map[string]bool // set of active peers, keyed by addr
+}
+
+func newHub(addr string, peerAddrs []string) *hub {
 	// TODO: Attempt to read agent id from persistent storage.
-	h := &hub{agentId: uint32(rand.Int31())}
+	h := &hub{
+		agentId: uint32(rand.Int31()),
+		addr:    addr,
+		peers:   make(map[string]bool),
+	}
 	h.store = store.OpenStore(&h.mu)
+	log.Printf("started agent %d", h.agentId)
+	// Start streaming updates from peers.
+	for _, peerAddr := range peerAddrs {
+		if peerAddr != "" {
+			go h.recvPatches(peerAddr)
+		}
+	}
 	return h
+}
+
+// recvPatches requests patches from the given peer. If the peer is available,
+// they will stream back patches. We forget about this peer once the connection
+// is closed.
+func (h *hub) recvPatches(peerAddr string) {
+	h.mu.Lock()
+	if h.peers[peerAddr] {
+		// We're already streaming patches from this peer.
+		h.mu.Unlock()
+		return
+	}
+	h.peers[peerAddr] = true
+	vec := h.store.Log.Head()
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		delete(h.peers, peerAddr)
+		h.mu.Unlock()
+	}()
+	// Dial peer.
+	conn, _, err := websocket.DefaultDialer.Dial("ws://"+peerAddr, nil)
+	if err != nil {
+		log.Printf("peer %s: dial failed: %v", peerAddr, err)
+		return
+	}
+	log.Printf("peer %s: established connection", peerAddr)
+	// Send SubscribeI2R message.
+	ok(conn.WriteJSON(&SubscribeI2R{
+		Type:          "SubscribeI2R",
+		AgentId:       h.agentId,
+		Addr:          h.addr,
+		VersionVector: vec,
+	}))
+	// Process patches streamed from peer.
+	for {
+		_, buf, err := conn.ReadMessage()
+		if isCloseError(err) {
+			log.Printf("peer %s: conn closed: %v", peerAddr, err)
+			conn.Close()
+			return
+		}
+		var msg PatchR2I
+		ok(json.Unmarshal(buf, &msg))
+		assert(msg.Type == "PatchR2I", msg)
+		// Update store and log.
+		h.mu.Lock()
+		err = h.store.ApplyServerPatch(msg.AgentId, msg.AgentSeq, msg.Key, msg.DType, msg.Patch)
+		h.mu.Unlock()
+		ok(err)
+	}
 }
 
 type stream struct {
 	h           *hub
 	conn        *websocket.Conn
 	initialized bool
-	// Populated if connection is from a client.
-	clientId uint32
-	// Queue of written local sequence numbers. Used to determine whether a log
-	// record originated from this client.
+	// Queue of written local sequence numbers, populated if connection is from a
+	// client. Used to determine whether a log record originated from this
+	// particular client.
 	// TODO: Use a linked list or somesuch.
 	localSeqs []uint32
-	// Populated if connection is from a server (a peer).
+	// Populated if connection is from a peer.
 	agentId uint32
 	vec     *common.VersionVector
 }
@@ -80,8 +146,6 @@ func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 		return errAlreadyInitialized
 	}
 	s.initialized = true
-	s.clientId = s.h.nextClientId
-	s.h.nextClientId++
 	// While holding mu, snapshot current values and version vector.
 	valueMsgs := []ValueS2C{}
 	it := s.h.store.NewIterator()
@@ -102,13 +166,6 @@ func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 	}
 	vec := s.h.store.Log.Head()
 	s.h.mu.Unlock()
-	if err := s.conn.WriteJSON(&SubscribeResponseS2C{
-		Type:     "SubscribeResponseS2C",
-		AgentId:  s.h.agentId,
-		ClientId: s.clientId,
-	}); err != nil {
-		return err
-	}
 	for _, valueMsg := range valueMsgs {
 		if err := s.conn.WriteJSON(valueMsg); err != nil {
 			return err
@@ -119,7 +176,7 @@ func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 	}); err != nil {
 		return err
 	}
-	go s.streamPatches(vec)
+	go s.sendPatches(vec, true)
 	return nil
 }
 
@@ -131,13 +188,8 @@ func (s *stream) processSubscribeI2R(msg *SubscribeI2R) error {
 	s.initialized = true
 	s.agentId = msg.AgentId
 	s.h.mu.Unlock()
-	if err := s.conn.WriteJSON(&SubscribeResponseR2I{
-		Type:    "SubscribeResponseR2I",
-		AgentId: s.h.agentId,
-	}); err != nil {
-		return err
-	}
-	// TODO: Start streaming patches.
+	go s.h.recvPatches(msg.Addr)
+	go s.sendPatches(msg.VersionVector, false)
 	return nil
 }
 
@@ -148,9 +200,7 @@ func (s *stream) processPatchC2S(msg *PatchC2S) error {
 		return errors.New("not initialized")
 	}
 	// Update store and log.
-	// TODO: If the patch had no effect on the value, perhaps we should avoid
-	// broadcasting it to subscribers.
-	localSeq, err := s.h.store.ApplyPatch(s.h.agentId, msg.Key, msg.DType, msg.Patch, true)
+	localSeq, err := s.h.store.ApplyClientPatch(s.h.agentId, msg.Key, msg.DType, msg.Patch)
 	if err != nil {
 		return err
 	}
@@ -158,28 +208,30 @@ func (s *stream) processPatchC2S(msg *PatchC2S) error {
 	return nil
 }
 
-// streamPatches streams patches to the client until the connection is closed.
-func (s *stream) streamPatches(vec *common.VersionVector) {
-	go func() {
-		closed := false
-		for !closed {
-			s.h.store.Log.Wait(vec)
-			it := s.h.store.Log.NewIterator(vec)
-			for {
-				s.h.mu.Lock()
-				advanced := it.Advance()
-				s.h.mu.Unlock()
-				if !advanced {
-					break
-				}
-				vec = it.VersionVector()
-				patch := it.Patch()
+// sendPatches streams patches to the client or peer server until the connection
+// is closed.
+func (s *stream) sendPatches(vec *common.VersionVector, isClient bool) {
+	for {
+		s.h.store.Log.Wait(vec)
+		it := s.h.store.Log.NewIterator(vec)
+		for {
+			s.h.mu.Lock()
+			advanced := it.Advance()
+			s.h.mu.Unlock()
+			if !advanced {
+				break
+			}
+			patch := it.Patch()
+			var err error
+			// TODO: If the patch had no effect on the value, perhaps we should
+			// somehow avoid broadcasting it to subscribers.
+			if isClient {
 				isLocal := false
 				if len(s.localSeqs) > 0 && s.localSeqs[0] == patch.LocalSeq {
 					isLocal = true
 					s.localSeqs = s.localSeqs[1:]
 				}
-				err := s.conn.WriteJSON(&PatchS2C{
+				err = s.conn.WriteJSON(&PatchS2C{
 					Type:    "PatchS2C",
 					AgentId: it.AgentId(),
 					IsLocal: isLocal,
@@ -187,60 +239,71 @@ func (s *stream) streamPatches(vec *common.VersionVector) {
 					DType:   patch.DType,
 					Patch:   patch.Patch,
 				})
-				if err == websocket.ErrCloseSent {
-					closed = true
-					break
+			} else {
+				// TODO: Update our notion of the peer's knowledge based on patches we
+				// receive from them.
+				if s.agentId != it.AgentId() {
+					err = s.conn.WriteJSON(&PatchR2I{
+						Type:     "PatchR2I",
+						AgentId:  it.AgentId(),
+						AgentSeq: it.AgentSeq(),
+						Key:      patch.Key,
+						DType:    patch.DType,
+						Patch:    patch.Patch,
+					})
 				}
-				ok(err)
 			}
-			ok(it.Err())
-		}
-	}()
-}
-
-func (h *hub) handleConn(w http.ResponseWriter, r *http.Request) {
-	const bufSize = 1024
-	conn, err := websocket.Upgrade(w, r, nil, bufSize, bufSize)
-	ok(err)
-	s := &stream{h: h, conn: conn}
-	done := make(chan struct{})
-
-	go func() {
-		for {
-			_, buf, err := conn.ReadMessage()
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				close(done)
+			// TODO: If a client goes away, the ReadMessage error is CloseGoingAway,
+			// and the error here is ErrCloseSent. However, if a peer server goes
+			// away, the ReadMessage error is CloseAbnormalClosure, and the error here
+			// is not ErrCloseSent. Is this an unavoidable race between a peer server
+			// going away and us sending them a patch?
+			if err == websocket.ErrCloseSent || err != nil && strings.Contains(err.Error(), "use of closed network connection") {
 				return
 			}
 			ok(err)
-			// TODO: Avoid decoding multiple times.
-			var mt MsgType
-			ok(json.Unmarshal(buf, &mt))
-			switch mt.Type {
-			case "SubscribeC2S":
-				var msg SubscribeC2S
-				ok(json.Unmarshal(buf, &msg))
-				ok(s.processSubscribeC2S(&msg))
-			case "SubscribeI2R":
-				var msg SubscribeI2R
-				ok(json.Unmarshal(buf, &msg))
-				ok(s.processSubscribeI2R(&msg))
-			case "PatchC2S":
-				var msg PatchC2S
-				ok(json.Unmarshal(buf, &msg))
-				ok(s.processPatchC2S(&msg))
-			default:
-				panic(fmt.Errorf("unknown message type: %s", mt.Type))
-			}
 		}
-	}()
-
-	<-done
-	conn.Close()
+		ok(it.Err())
+	}
 }
 
-func Serve(addr string) error {
-	h := newHub()
+func (h *hub) handleConn(w http.ResponseWriter, r *http.Request) {
+	conn, err := websocket.Upgrade(w, r, nil, 0, 0)
+	ok(err)
+	s := &stream{h: h, conn: conn}
+
+	for {
+		_, buf, err := conn.ReadMessage()
+		if isCloseError(err) {
+			log.Printf("conn closed: %v", err)
+			conn.Close()
+			return
+		}
+		ok(err)
+		// TODO: Avoid decoding multiple times.
+		var mt MsgType
+		ok(json.Unmarshal(buf, &mt))
+		switch mt.Type {
+		case "SubscribeC2S":
+			var msg SubscribeC2S
+			ok(json.Unmarshal(buf, &msg))
+			ok(s.processSubscribeC2S(&msg))
+		case "SubscribeI2R":
+			var msg SubscribeI2R
+			ok(json.Unmarshal(buf, &msg))
+			ok(s.processSubscribeI2R(&msg))
+		case "PatchC2S":
+			var msg PatchC2S
+			ok(json.Unmarshal(buf, &msg))
+			ok(s.processPatchC2S(&msg))
+		default:
+			panic(fmt.Errorf("unknown message type: %s", mt.Type))
+		}
+	}
+}
+
+func Serve(addr string, peerAddrs []string) error {
+	h := newHub(addr, peerAddrs)
 	http.HandleFunc("/", h.handleConn)
 	go func() {
 		time.Sleep(100 * time.Millisecond)

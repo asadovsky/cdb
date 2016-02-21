@@ -311,8 +311,9 @@ func (s *CString) ApplyServerPatch(patch string) error {
 
 // ApplyClientPatch implements CValue.ApplyClientPatch.
 func (s *CString) ApplyClientPatch(agentId uint32, vec *common.VersionVector, _ time.Time, patch string) (string, error) {
-	agentSeq, ok := vec.Get(agentId)
-	if !ok {
+	agentSeq := vec.Get(agentId)
+	// Sanity check.
+	if agentSeq == 0 {
 		return "", fmt.Errorf("unknown agent: %d", agentId)
 	}
 	ops, err := decodePatch(patch)

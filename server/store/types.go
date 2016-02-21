@@ -13,10 +13,9 @@ type ValueEnvelope struct {
 
 // PatchEnvelope represents a patch and its associated metadata.
 // Key is of the form [AgentId]:[AgentSeq], where AgentId is the creator's agent
-// id and [AgentSeq] is the position in the sequence of patches created by
-// AgentId.
+// id and [AgentSeq] is the creator's sequence number for this patch.
 type PatchEnvelope struct {
-	LocalSeq uint32 // position in local, cross-agent patch log
+	LocalSeq uint32 // one-based position in local, cross-agent patch log
 	Key      string
 	DType    string
 	Patch    string // encoded

@@ -254,13 +254,14 @@ CString.prototype.getText = function() {
   return this.text_;
 };
 
-// Returns the selection range, an array representing [start, end).
+// Returns the selection range, an array representing the half-closed interval
+// [start, end).
 CString.prototype.getSelectionRange = function(value) {
   return [this.selStart_, this.selEnd_];
 };
 
-// Replaces 'len' characters, starting at position 'pos', with 'value'.
-// Assumes line breaks have been canonicalized to \n.
+// Replaces text.substr(pos, len) with the given value and updates the selection
+// range accordingly. Assumes line breaks have been canonicalized to \n.
 CString.prototype.replaceText = function(pos, len, value) {
   if (this.paused_) {
     throw new Error('paused');
@@ -284,7 +285,7 @@ CString.prototype.replaceText = function(pos, len, value) {
   this.emit('patch', encodePatch(ops));
 };
 
-// Sets the selection range to [start, end).
+// Updates the selection range to the half-closed interval [start, end).
 CString.prototype.setSelectionRange = function(start, end) {
   if (this.paused_) {
     throw new Error('paused');
