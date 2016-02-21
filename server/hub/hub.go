@@ -45,8 +45,16 @@ func jsonMarshal(v interface{}) []byte {
 	return buf
 }
 
-func isCloseError(err error) bool {
+func isReadFromClosedConnError(err error) bool {
 	return websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure)
+}
+
+func isWriteToClosedConnError(err error) bool {
+	// TODO: If a client goes away, the read error is CloseGoingAway and the write
+	// error is ErrCloseSent. However, if a peer goes away, the read error is
+	// CloseAbnormalClosure and the write error is not ErrCloseSent. Is this an
+	// unavoidable race between a peer going away and us sending them data?
+	return err == websocket.ErrCloseSent || err != nil && strings.Contains(err.Error(), "use of closed network connection")
 }
 
 type hub struct {
@@ -69,16 +77,15 @@ func newHub(addr string, peerAddrs []string) *hub {
 	// Start streaming updates from peers.
 	for _, peerAddr := range peerAddrs {
 		if peerAddr != "" {
-			go h.recvPatches(peerAddr)
+			go h.requestPatchesFromPeer(peerAddr)
 		}
 	}
 	return h
 }
 
-// recvPatches requests patches from the given peer. If the peer is available,
-// they will stream back patches. We forget about this peer once the connection
-// is closed.
-func (h *hub) recvPatches(peerAddr string) {
+// requestPatchesFromPeer requests patches from the given peer. If the peer is
+// available, they will reply with a never-ending stream of patches.
+func (h *hub) requestPatchesFromPeer(peerAddr string) {
 	h.mu.Lock()
 	if h.peers[peerAddr] {
 		// We're already streaming patches from this peer.
@@ -110,7 +117,7 @@ func (h *hub) recvPatches(peerAddr string) {
 	// Process patches streamed from peer.
 	for {
 		_, buf, err := conn.ReadMessage()
-		if isCloseError(err) {
+		if isReadFromClosedConnError(err) {
 			log.Printf("peer %s: conn closed: %v", peerAddr, err)
 			conn.Close()
 			return
@@ -126,33 +133,55 @@ func (h *hub) recvPatches(peerAddr string) {
 	}
 }
 
-type stream struct {
-	h           *hub
-	conn        *websocket.Conn
-	initialized bool
-	// Queue of written local sequence numbers, populated if connection is from a
-	// client. Used to determine whether a log record originated from this
-	// particular client.
-	// TODO: Use a linked list or somesuch.
-	localSeqs []uint32
-	// Populated if connection is from a peer.
-	agentId uint32
-	vec     *common.VersionVector
+// forEachLogEntry iterates over log entries beyond the given version vector.
+func (h *hub) forEachLogEntry(vec *common.VersionVector, handleLogEntry func(*store.LogIterator) error) error {
+	for {
+		h.store.Log.Wait(vec)
+		it := h.store.Log.NewIterator(vec)
+		for {
+			h.mu.Lock()
+			advanced := it.Advance()
+			h.mu.Unlock()
+			if !advanced {
+				break
+			}
+			if err := handleLogEntry(it); err != nil {
+				return err
+			}
+			vec = it.VersionVector()
+		}
+		if err := it.Err(); err != nil {
+			return err
+		}
+	}
 }
 
-func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
+type stream struct {
+	h    *hub
+	conn *websocket.Conn
+	mu   sync.Mutex
+
+	// Populated if connection is from a client.
+	gotSubscribeC2S bool
+	// Queue of written local sequence numbers. Used to determine whether a log
+	// record originated from this particular client.
+	// TODO: Use a linked list or somesuch.
+	localSeqs []uint32
+
+	// Populated if connection is from a peer.
+	gotSubscribeI2R bool
+	agentId         uint32
+}
+
+func (s *stream) snapshot() ([]ValueS2C, *common.VersionVector, error) {
 	s.h.mu.Lock()
-	if s.initialized {
-		return errAlreadyInitialized
-	}
-	s.initialized = true
-	// While holding mu, snapshot current values and version vector.
+	defer s.h.mu.Unlock()
 	valueMsgs := []ValueS2C{}
 	it := s.h.store.NewIterator()
 	for it.Advance() {
 		valueStr, err := it.Value().Value.Encode()
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		valueMsgs = append(valueMsgs, ValueS2C{
 			Type:  "ValueS2C",
@@ -162,10 +191,22 @@ func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 		})
 	}
 	if err := it.Err(); err != nil {
+		return nil, nil, err
+	}
+	return valueMsgs, s.h.store.Log.Head(), nil
+}
+
+func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
+	s.mu.Lock()
+	if s.gotSubscribeC2S || s.gotSubscribeI2R {
+		return errAlreadyInitialized
+	}
+	s.gotSubscribeC2S = true
+	s.mu.Unlock()
+	valueMsgs, vec, err := s.snapshot()
+	if err != nil {
 		return err
 	}
-	vec := s.h.store.Log.Head()
-	s.h.mu.Unlock()
 	for _, valueMsg := range valueMsgs {
 		if err := s.conn.WriteJSON(valueMsg); err != nil {
 			return err
@@ -176,95 +217,88 @@ func (s *stream) processSubscribeC2S(msg *SubscribeC2S) error {
 	}); err != nil {
 		return err
 	}
-	go s.sendPatches(vec, true)
+	go func() {
+		ok(s.h.forEachLogEntry(vec, func(it *store.LogIterator) error {
+			patch := it.Patch()
+			isLocal := false
+			s.mu.Lock()
+			if len(s.localSeqs) > 0 && s.localSeqs[0] == patch.LocalSeq {
+				isLocal = true
+				s.localSeqs = s.localSeqs[1:]
+			}
+			s.mu.Unlock()
+			// TODO: If the patch had no effect on the value, perhaps we should
+			// somehow avoid broadcasting it to subscribers.
+			err := s.conn.WriteJSON(&PatchS2C{
+				Type:    "PatchS2C",
+				AgentId: it.AgentId(),
+				IsLocal: isLocal,
+				Key:     patch.Key,
+				DType:   patch.DType,
+				Patch:   patch.Patch,
+			})
+			if isWriteToClosedConnError(err) {
+				return nil
+			}
+			return err
+		}))
+	}()
 	return nil
 }
 
 func (s *stream) processSubscribeI2R(msg *SubscribeI2R) error {
-	s.h.mu.Lock()
-	if s.initialized {
+	s.mu.Lock()
+	if s.gotSubscribeC2S || s.gotSubscribeI2R {
 		return errAlreadyInitialized
 	}
-	s.initialized = true
+	s.gotSubscribeI2R = true
 	s.agentId = msg.AgentId
-	s.h.mu.Unlock()
-	go s.h.recvPatches(msg.Addr)
-	go s.sendPatches(msg.VersionVector, false)
+	s.mu.Unlock()
+	go func() {
+		ok(s.h.forEachLogEntry(msg.VersionVector, func(it *store.LogIterator) error {
+			// TODO: Update our notion of the peer's knowledge based on patches we
+			// receive from them.
+			if s.agentId == it.AgentId() {
+				return nil
+			}
+			patch := it.Patch()
+			err := s.conn.WriteJSON(&PatchR2I{
+				Type:     "PatchR2I",
+				AgentId:  it.AgentId(),
+				AgentSeq: it.AgentSeq(),
+				Key:      patch.Key,
+				DType:    patch.DType,
+				Patch:    patch.Patch,
+			})
+			if isWriteToClosedConnError(err) {
+				return nil
+			}
+			return err
+		}))
+	}()
+	// Turn around and request patches from this peer.
+	go s.h.requestPatchesFromPeer(msg.Addr)
 	return nil
 }
 
 func (s *stream) processPatchC2S(msg *PatchC2S) error {
-	s.h.mu.Lock()
-	defer s.h.mu.Unlock()
-	if !s.initialized {
-		return errors.New("not initialized")
+	s.mu.Lock()
+	if !s.gotSubscribeC2S {
+		s.mu.Unlock()
+		return errors.New("did not get SubscribeC2S message")
 	}
+	s.mu.Unlock()
 	// Update store and log.
+	s.h.mu.Lock()
 	localSeq, err := s.h.store.ApplyClientPatch(s.h.agentId, msg.Key, msg.DType, msg.Patch)
+	s.h.mu.Unlock()
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
 	s.localSeqs = append(s.localSeqs, localSeq)
+	s.mu.Unlock()
 	return nil
-}
-
-// sendPatches streams patches to the client or peer server until the connection
-// is closed.
-func (s *stream) sendPatches(vec *common.VersionVector, isClient bool) {
-	for {
-		s.h.store.Log.Wait(vec)
-		it := s.h.store.Log.NewIterator(vec)
-		for {
-			s.h.mu.Lock()
-			advanced := it.Advance()
-			s.h.mu.Unlock()
-			if !advanced {
-				break
-			}
-			patch := it.Patch()
-			var err error
-			// TODO: If the patch had no effect on the value, perhaps we should
-			// somehow avoid broadcasting it to subscribers.
-			if isClient {
-				isLocal := false
-				if len(s.localSeqs) > 0 && s.localSeqs[0] == patch.LocalSeq {
-					isLocal = true
-					s.localSeqs = s.localSeqs[1:]
-				}
-				err = s.conn.WriteJSON(&PatchS2C{
-					Type:    "PatchS2C",
-					AgentId: it.AgentId(),
-					IsLocal: isLocal,
-					Key:     patch.Key,
-					DType:   patch.DType,
-					Patch:   patch.Patch,
-				})
-			} else {
-				// TODO: Update our notion of the peer's knowledge based on patches we
-				// receive from them.
-				if s.agentId != it.AgentId() {
-					err = s.conn.WriteJSON(&PatchR2I{
-						Type:     "PatchR2I",
-						AgentId:  it.AgentId(),
-						AgentSeq: it.AgentSeq(),
-						Key:      patch.Key,
-						DType:    patch.DType,
-						Patch:    patch.Patch,
-					})
-				}
-			}
-			// TODO: If a client goes away, the ReadMessage error is CloseGoingAway,
-			// and the error here is ErrCloseSent. However, if a peer server goes
-			// away, the ReadMessage error is CloseAbnormalClosure, and the error here
-			// is not ErrCloseSent. Is this an unavoidable race between a peer server
-			// going away and us sending them a patch?
-			if err == websocket.ErrCloseSent || err != nil && strings.Contains(err.Error(), "use of closed network connection") {
-				return
-			}
-			ok(err)
-		}
-		ok(it.Err())
-	}
 }
 
 func (h *hub) handleConn(w http.ResponseWriter, r *http.Request) {
@@ -274,10 +308,9 @@ func (h *hub) handleConn(w http.ResponseWriter, r *http.Request) {
 
 	for {
 		_, buf, err := conn.ReadMessage()
-		if isCloseError(err) {
+		if isReadFromClosedConnError(err) {
 			log.Printf("conn closed: %v", err)
-			conn.Close()
-			return
+			break
 		}
 		ok(err)
 		// TODO: Avoid decoding multiple times.
@@ -300,6 +333,8 @@ func (h *hub) handleConn(w http.ResponseWriter, r *http.Request) {
 			panic(fmt.Errorf("unknown message type: %s", mt.Type))
 		}
 	}
+
+	conn.Close()
 }
 
 func Serve(addr string, peerAddrs []string) error {
