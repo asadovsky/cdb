@@ -4,6 +4,9 @@ CRDT database design exploration.
 
 ## Demo instructions
 
+The following instructions assume you have Go 1.5 (or higher) and Node.js 4.3
+(or higher) installed.
+
 Fetch and build the code:
 
     GOPATH=~/dev/go
