@@ -9,7 +9,7 @@ Fetch and build the code:
     GOPATH=~/dev/go
     mkdir -p $(GOPATH)/src/github.com/asadovsky
     cd $(GOPATH)/src/github.com/asadovsky
-    git clone git@github.com:asadovsky/cdb.git
+    git clone --recursive git@github.com:asadovsky/cdb.git
     cd cdb
     make build
 
