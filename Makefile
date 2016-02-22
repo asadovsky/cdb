@@ -1,6 +1,7 @@
 SHELL := /bin/bash -euo pipefail
 PATH := node_modules/.bin:$(PATH)
 GOPATH := $(HOME)/dev/go
+export GO15VENDOREXPERIMENT := 1
 
 define BROWSERIFY
 	@mkdir -p $(dir $2)
