@@ -1,6 +1,6 @@
 SHELL := /bin/bash -euo pipefail
 PATH := node_modules/.bin:$(PATH)
-GOPATH := $(HOME)/dev/go
+GOPATH := $(shell pwd | sed 's!/src/github.com/asadovsky/cdb!!')
 export GO15VENDOREXPERIMENT := 1
 
 define BROWSERIFY

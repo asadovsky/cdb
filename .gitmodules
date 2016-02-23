@@ -1,3 +1,6 @@
 [submodule "vendor/github.com/gorilla/websocket"]
 	path = vendor/github.com/gorilla/websocket
-	url = git@github.com:gorilla/websocket.git
+	url = https://github.com/gorilla/websocket.git
+[submodule "vendor/github.com/asadovsky/gosh"]
+	path = vendor/github.com/asadovsky/gosh
+	url = https://github.com/asadovsky/gosh.git
