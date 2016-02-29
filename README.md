@@ -9,7 +9,7 @@ above) installed.
 
 Fetch and build the code:
 
-    GOPATH=~/dev/go
+    export GOPATH=~/dev/go
     mkdir -p ${GOPATH}/src/github.com/asadovsky
     cd ${GOPATH}/src/github.com/asadovsky
     git clone --recursive https://github.com/asadovsky/cdb.git
