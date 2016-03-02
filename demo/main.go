@@ -46,7 +46,7 @@ func ip() (string, error) {
 func main() {
 	gosh.InitMain()
 	flag.Parse()
-	sh := gosh.NewShell(gosh.Opts{})
+	sh := gosh.NewShell(nil)
 	defer sh.Cleanup()
 	cwd, err := os.Getwd()
 	ok(err)
